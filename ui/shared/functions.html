@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="View exposed functions for a LEAP2 experiment.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+  <title>Functions — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+  <script src="/static/theme-toggle.js" defer></script>
+</head>
+<body>
+  <a class="skip-to-content" href="#main">Skip to content</a>
+
+  <nav class="navbar">
+    <a class="navbar-brand" href="/"><span>LEAP</span>2</a>
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="navbar-links">
+      <a href="#" id="dash-link" class="nav-lab">Lab</a>
+      <a href="#" id="calllog-link">Call Log</a>
+      <span class="nav-divider"></span>
+      <a href="#" id="students-link" class="nav-shared">Students</a>
+      <a href="#" id="logs-link" class="nav-shared">Logs</a>
+      <a href="#" id="readme-link" class="nav-shared">README</a>
+      <a href="/" class="nav-shared">All Experiments</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="#" id="bc-exp-link">default</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Functions</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Exposed Functions</h1>
+      <p>All callable RPC functions for this experiment.</p>
+    </div>
+
+    <div id="error" class="alert alert-error hidden"></div>
+    <div id="loading">Loading functions...</div>
+
+    <div id="fn-count" class="fn-count hidden"></div>
+    <div id="fn-grid" class="fn-grid"></div>
+
+    <div id="empty" class="empty-state hidden">
+      <h2>No functions found</h2>
+      <p>Add Python files to this experiment's <code>funcs/</code> directory and reload.</p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/docs">API Docs</a> <span class="footer-sep">&middot;</span>
+    <a href="/login" class="footer-admin">Admin</a> <span class="footer-sep">&middot;</span>
+    <a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>
+    <br>
+    <span class="footer-meta">
+      <span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>
+      <span class="footer-sep">&middot;</span>
+      <span id="ft-info"></span>
+    </span>
+  </footer>
+  <script>(function(){fetch("/api/health").then(function(r){return r.json()}).then(function(d){document.getElementById("ft-dot").classList.remove("offline");document.getElementById("ft-status").textContent="Healthy";var v=d.version?"v"+d.version:"";document.getElementById("ft-info").textContent=v}).catch(function(){document.getElementById("ft-status").textContent="Offline"});fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){var n=(d.experiments||[]).length;var info=document.getElementById("ft-info");if(n>0)info.textContent=(info.textContent?info.textContent+" \u00b7 ":"")+"Serving "+n+" experiment"+(n!==1?"s":"")}).catch(function(){})})()</script>
+  <script>
+    (function () {
+      var expName = new URLSearchParams(window.location.search).get("exp") || "default";
+      document.getElementById("dash-link").href = "/exp/" + expName + "/ui/dashboard.html";
+      document.getElementById("calllog-link").href = "/exp/" + expName + "/ui/call-log.html";
+      document.getElementById("students-link").href = "/static/students.html?exp=" + expName;
+      document.getElementById("logs-link").href = "/static/logs.html?exp=" + expName;
+      document.getElementById("readme-link").href = "/static/readme.html?exp=" + expName;
+      document.getElementById("bc-exp-link").href = "/exp/" + expName + "/ui/dashboard.html";
+      document.getElementById("bc-exp-link").textContent = expName;
+
+      fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){
+        var exp = (d.experiments||[]).find(function(e){return e.name===expName});
+        if(exp) {
+          if(exp.entry_point) document.getElementById("dash-link").href="/exp/"+expName+"/ui/"+exp.entry_point;
+          var sc = exp.student_count || 0;
+          document.getElementById("students-link").textContent = "Students (" + sc + ")";
+        }
+      }).catch(function(){});
+      fetch("/exp/"+expName+"/log-options").then(function(r){return r.json()}).then(function(opts){
+        var lc = opts.log_count || 0;
+        document.getElementById("logs-link").textContent = "Logs (" + lc + ")";
+      }).catch(function(){});
+
+      var errorEl = document.getElementById("error");
+      var loadingEl = document.getElementById("loading");
+      var gridEl = document.getElementById("fn-grid");
+      var countEl = document.getElementById("fn-count");
+      var emptyEl = document.getElementById("empty");
+
+      fetch("/exp/" + expName + "/functions")
+        .then(function (res) {
+          if (!res.ok) throw new Error("Failed to load functions (HTTP " + res.status + ")");
+          return res.json();
+        })
+        .then(function (funcs) {
+          loadingEl.classList.add("hidden");
+          var names = Object.keys(funcs).sort();
+
+          if (names.length === 0) {
+            emptyEl.classList.remove("hidden");
+            return;
+          }
+
+          countEl.textContent = names.length + " function" + (names.length !== 1 ? "s" : "");
+          countEl.classList.remove("hidden");
+
+          names.forEach(function (name) {
+            var info = funcs[name];
+            var card = document.createElement("div");
+            card.className = "fn-card";
+
+            var header = document.createElement("div");
+            header.className = "fn-card-header";
+
+            var nameEl = document.createElement("span");
+            nameEl.className = "fn-card-name";
+            nameEl.textContent = name;
+            header.appendChild(nameEl);
+
+            var badges = document.createElement("div");
+            badges.className = "fn-badges";
+            if (info.nolog) {
+              var b = document.createElement("span");
+              b.className = "badge badge-nolog";
+              b.textContent = "@nolog";
+              badges.appendChild(b);
+            }
+            if (info.noregcheck) {
+              var b2 = document.createElement("span");
+              b2.className = "badge badge-noregcheck";
+              b2.textContent = "@noregcheck";
+              badges.appendChild(b2);
+            }
+            if (badges.children.length) header.appendChild(badges);
+
+            card.appendChild(header);
+
+            var sig = document.createElement("div");
+            sig.className = "fn-card-sig";
+            sig.innerHTML = "<span class='fn-card-sig-kw'>def</span> " + name + "<span class='fn-card-sig-params'>" + (info.signature || "(...)") + "</span>";
+            card.appendChild(sig);
+
+            if (info.doc) {
+              var doc = document.createElement("div");
+              doc.className = "fn-card-doc";
+              doc.textContent = info.doc;
+              card.appendChild(doc);
+            }
+
+            gridEl.appendChild(card);
+          });
+        })
+        .catch(function (err) {
+          loadingEl.classList.add("hidden");
+          errorEl.textContent = err.message;
+          errorEl.classList.remove("hidden");
+        });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Experiment dashboard — view available functions and get started.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+  <title>Default Lab — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+</head>
+<body>
+  <a class="skip-to-content" href="#main">Skip to content</a>
+
+  <nav class="navbar">
+    <a class="navbar-brand" href="/"><span>LEAP</span>2</a>
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="navbar-links">
+      <a href="#" id="calllog-link">Call Log</a>
+      <span class="nav-divider"></span>
+      <a href="#" id="students-link" class="nav-shared">Students</a>
+      <a href="#" id="logs-link" class="nav-shared">Logs</a>
+      <a href="#" id="functions-link" class="nav-shared">Functions</a>
+      <a href="#" id="readme-link" class="nav-shared">README</a>
+      <a href="/" class="nav-shared">All Experiments</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <span id="bc-exp">default</span>
+    </nav>
+
+    <div class="page-header">
+      <h1 id="exp-title">Default Lab</h1>
+      <p id="exp-desc">Loading...</p>
+    </div>
+
+    <section style="margin-bottom:2rem;">
+      <h2 class="section-title">Available Functions</h2>
+      <div id="loading">Loading functions...</div>
+      <div id="error" class="alert alert-error hidden"></div>
+      <div class="table-wrap">
+        <table class="table hidden" id="func-table">
+          <thead>
+            <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+          </thead>
+          <tbody id="func-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">Quick Start</h2>
+      <pre><code>from leap.client import Client
+
+client = Client("http://localhost:9000", student_id="s001", experiment="default")
+print(client.square(7))   # 49
+print(client.add(3, 5))   # 8</code></pre>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/docs">API Docs</a> <span class="footer-sep">&middot;</span>
+    <a href="/login" class="footer-admin">Admin</a> <span class="footer-sep">&middot;</span>
+    <a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>
+    <br>
+    <span class="footer-meta">
+      <span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>
+      <span class="footer-sep">&middot;</span>
+      <span id="ft-info"></span>
+    </span>
+  </footer>
+  <script>(function(){fetch("/api/health").then(function(r){return r.json()}).then(function(d){document.getElementById("ft-dot").classList.remove("offline");document.getElementById("ft-status").textContent="Healthy";var v=d.version?"v"+d.version:"";document.getElementById("ft-info").textContent=v}).catch(function(){document.getElementById("ft-status").textContent="Offline"});fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){var n=(d.experiments||[]).length;var info=document.getElementById("ft-info");if(n>0)info.textContent=(info.textContent?info.textContent+" \u00b7 ":"")+"Serving "+n+" experiment"+(n!==1?"s":"")}).catch(function(){})})()</script>
+  <script>
+    (async function () {
+      var expName = "default";
+      var pathParts = window.location.pathname.split("/");
+      var expIdx = pathParts.indexOf("exp");
+      if (expIdx !== -1 && pathParts.length > expIdx + 1) {
+        expName = pathParts[expIdx + 1];
+      }
+
+      document.getElementById("calllog-link").href = "/exp/" + expName + "/ui/call-log.html";
+      document.getElementById("functions-link").href = "/static/functions.html?exp=" + expName;
+      document.getElementById("students-link").href = "/static/students.html?exp=" + expName;
+      document.getElementById("logs-link").href = "/static/logs.html?exp=" + expName;
+      document.getElementById("readme-link").href = "/static/readme.html?exp=" + expName;
+      document.getElementById("bc-exp").textContent = expName;
+
+      var titleEl = document.getElementById("exp-title");
+      var descEl = document.getElementById("exp-desc");
+      var loadingEl = document.getElementById("loading");
+      var errorEl = document.getElementById("error");
+      var tableEl = document.getElementById("func-table");
+      var bodyEl = document.getElementById("func-body");
+
+      try {
+        var metaRes = await fetch("/api/experiments");
+        if (metaRes.ok) {
+          var metaData = await metaRes.json();
+          var exp = (metaData.experiments || []).find(function (e) { return e.name === expName; });
+          if (exp) {
+            titleEl.textContent = exp.display_name || exp.name;
+            descEl.textContent = exp.description || "";
+          }
+        }
+      } catch (_) {}
+
+      try {
+        var res = await fetch("/exp/" + expName + "/functions");
+        if (!res.ok) throw new Error("Server returned " + res.status);
+        var funcs = await res.json();
+        loadingEl.classList.add("hidden");
+
+        var names = Object.keys(funcs);
+        if (names.length === 0) {
+          loadingEl.textContent = "No functions loaded.";
+          loadingEl.classList.remove("hidden");
+          return;
+        }
+
+        names.sort();
+        names.forEach(function (name) {
+          var tr = document.createElement("tr");
+          var td1 = document.createElement("td");
+          td1.innerHTML = "<code>" + name + "</code>";
+          var td2 = document.createElement("td");
+          td2.innerHTML = "<code>" + (funcs[name].signature || "") + "</code>";
+          var td3 = document.createElement("td");
+          td3.textContent = funcs[name].doc || "";
+          td3.style.color = "var(--color-text-muted)";
+          td3.style.fontSize = "0.8125rem";
+          tr.appendChild(td1);
+          tr.appendChild(td2);
+          tr.appendChild(td3);
+          bodyEl.appendChild(tr);
+        });
+        tableEl.classList.remove("hidden");
+      } catch (err) {
+        loadingEl.classList.add("hidden");
+        errorEl.textContent = "Failed to load functions: " + err.message;
+        errorEl.classList.remove("hidden");
+      }
+    })();
+  </script>
+</body>
+</html>

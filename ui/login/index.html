@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Admin login for LEAP2.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+  <title>Login — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+</head>
+<body>
+  <a class="skip-to-content" href="#main">Skip to content</a>
+
+  <nav class="navbar">
+    <a class="navbar-brand" href="/"><span>LEAP</span>2</a>
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="navbar-links">
+      <a href="/">All Experiments</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <div class="centered" id="main">
+    <div class="card">
+      <div class="card-title" style="text-align:center; font-size:1.25rem; margin-bottom:1.25rem;">
+        Admin Login
+      </div>
+
+      <div id="error" class="alert alert-error hidden"></div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input class="input" type="password" id="password" name="password"
+                 placeholder="Enter admin password" required autofocus>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="submit-btn">
+          Log in
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <a href="/docs">API Docs</a> <span class="footer-sep">&middot;</span>
+    <a href="/login" class="footer-admin">Admin</a> <span class="footer-sep">&middot;</span>
+    <a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>
+    <br>
+    <span class="footer-meta">
+      <span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>
+      <span class="footer-sep">&middot;</span>
+      <span id="ft-info"></span>
+    </span>
+  </footer>
+  <script>(function(){fetch("/api/health").then(function(r){return r.json()}).then(function(d){document.getElementById("ft-dot").classList.remove("offline");document.getElementById("ft-status").textContent="Healthy";var v=d.version?"v"+d.version:"";document.getElementById("ft-info").textContent=v}).catch(function(){document.getElementById("ft-status").textContent="Offline"});fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){var n=(d.experiments||[]).length;var info=document.getElementById("ft-info");if(n>0)info.textContent=(info.textContent?info.textContent+" \u00b7 ":"")+"Serving "+n+" experiment"+(n!==1?"s":"")}).catch(function(){})})()</script>
+  <script>
+    (function () {
+      var form = document.getElementById("login-form");
+      var errorEl = document.getElementById("error");
+      var submitBtn = document.getElementById("submit-btn");
+      var passwordInput = document.getElementById("password");
+
+      var params = new URLSearchParams(window.location.search);
+      var next = params.get("next") || "/";
+
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        errorEl.classList.add("hidden");
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Logging in...";
+
+        try {
+          var res = await fetch("/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: passwordInput.value }),
+          });
+
+          if (res.ok) {
+            window.location.href = next;
+            return;
+          }
+
+          var data = {};
+          try { data = await res.json(); } catch (_) {}
+          errorEl.textContent = data.detail || "Invalid password";
+          errorEl.classList.remove("hidden");
+        } catch (err) {
+          errorEl.textContent = "Connection error: " + err.message;
+          errorEl.classList.remove("hidden");
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Log in";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

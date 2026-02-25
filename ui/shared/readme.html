@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en" style="scroll-behavior:smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Experiment README for a LEAP2 experiment.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+  <title>README — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&display=swap" rel="stylesheet">
+  <script src="/static/theme-toggle.js" defer></script>
+  <style>
+    /* ── Two-column layout ── */
+    .readme-layout {
+      display: grid;
+      grid-template-columns: 1fr 240px;
+      gap: 2rem;
+      align-items: start;
+    }
+    @media (max-width: 960px) {
+      .readme-layout {
+        grid-template-columns: 1fr;
+      }
+      .readme-sidebar { order: -1; }
+    }
+
+    /* ── Sidebar (frontmatter + TOC) ── */
+    .readme-sidebar {
+      position: sticky;
+      top: 4.5rem;
+      max-height: calc(100vh - 6rem);
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    .readme-sidebar::-webkit-scrollbar { width: 4px; }
+    .readme-sidebar::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+
+    .sidebar-section {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      padding: 0.875rem 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .sidebar-title {
+      font-family: 'Source Serif 4', Georgia, serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin: 0 0 0.5rem;
+    }
+
+    /* ── Frontmatter banner ── */
+    .frontmatter-banner {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-left: 3px solid var(--color-primary);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .frontmatter {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.2rem 0.75rem;
+      font-size: 0.8rem;
+    }
+    .fm-key {
+      font-family: 'Source Serif 4', Georgia, serif;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      white-space: nowrap;
+    }
+    .fm-val {
+      font-family: var(--font-mono);
+      font-size: 0.775rem;
+      word-break: break-word;
+    }
+
+    /* ── TOC ── */
+    .toc ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      counter-reset: toc;
+    }
+    .toc ol ol {
+      padding-left: 0.875rem;
+    }
+    .toc li {
+      counter-increment: toc;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .toc li::before {
+      content: counters(toc, ".") " ";
+      color: var(--color-text-muted);
+      font-size: 0.6rem;
+      font-family: var(--font-mono);
+      margin-right: 0.2rem;
+      opacity: 0.6;
+    }
+    .toc a {
+      color: var(--color-text);
+      text-decoration: none;
+      font-size: 0.75rem;
+      transition: color 0.15s;
+    }
+    .toc a:hover {
+      color: var(--color-primary);
+    }
+    .toc a.toc-active {
+      color: var(--color-primary);
+      font-weight: 600;
+    }
+
+    /* ── Markdown body ── */
+    .markdown-body {
+      font-family: 'Libre Baskerville', 'Source Serif 4', Georgia, 'Times New Roman', serif;
+      font-size: 1rem;
+      line-height: 1.8;
+      letter-spacing: 0.01em;
+      min-width: 0;
+    }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+      font-family: 'Source Serif 4', 'Libre Baskerville', Georgia, serif;
+    }
+    .markdown-body h1 { font-size: 1.75rem; font-weight: 700; margin: 2.5rem 0 0.75rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem; }
+    .markdown-body h2 { font-size: 1.375rem; font-weight: 600; margin: 2rem 0 0.625rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.375rem; }
+    .markdown-body h3 { font-size: 1.125rem; font-weight: 600; margin: 1.75rem 0 0.5rem; }
+    .markdown-body h1:first-child { margin-top: 0; }
+    .markdown-body p { margin: 0 0 1.125rem; text-align: left; hyphens: auto; }
+    .markdown-body ul, .markdown-body ol { margin: 0 0 1.125rem; padding-left: 1.75rem; }
+    .markdown-body li { margin-bottom: 0.35rem; }
+    .markdown-body li::marker { color: var(--color-text-muted); }
+    .markdown-body pre { margin: 0 0 1.25rem; position: relative; }
+    .markdown-body pre code.hljs { background: inherit; padding: inherit; }
+    .markdown-body pre code.hljs .line-num {
+      display: inline-block;
+      width: 2.5em;
+      text-align: right;
+      margin-right: 1em;
+      color: var(--color-text-muted);
+      opacity: 0.4;
+      user-select: none;
+      font-size: 0.8em;
+    }
+    .markdown-body code { font-size: 0.875em; }
+    .markdown-body blockquote {
+      border-left: 3px solid var(--color-primary-light);
+      padding: 0.5rem 1rem;
+      margin: 0 0 1.25rem;
+      color: var(--color-text-muted);
+      font-style: italic;
+    }
+    .markdown-body hr { border: none; border-top: 1px solid var(--color-border); margin: 2rem 0; }
+    .markdown-body img { max-width: 100%; border-radius: var(--radius); }
+    .markdown-body a { color: var(--color-primary); }
+    .markdown-body strong { font-weight: 700; }
+    .markdown-body em { font-style: italic; }
+    .markdown-body table { font-family: var(--font-sans, system-ui, sans-serif); font-size: 0.875rem; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <a class="skip-to-content" href="#main">Skip to content</a>
+
+  <nav class="navbar">
+    <a class="navbar-brand" href="/"><span>LEAP</span>2</a>
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="navbar-links">
+      <a href="#" id="dash-link" class="nav-lab">Lab</a>
+      <a href="#" id="calllog-link">Call Log</a>
+      <span class="nav-divider"></span>
+      <a href="#" id="students-link" class="nav-shared">Students</a>
+      <a href="#" id="logs-link" class="nav-shared">Logs</a>
+      <a href="#" id="functions-link" class="nav-shared">Functions</a>
+      <a href="#" id="readme-link" class="nav-shared">README</a>
+      <a href="/" class="nav-shared">All Experiments</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="#" id="bc-exp-link">default</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>README</span>
+    </nav>
+
+    <div id="error" class="alert alert-error hidden"></div>
+    <div id="loading">Loading README...</div>
+
+    <div class="readme-layout" id="readme-layout" style="display:none">
+      <div class="readme-main">
+        <div id="frontmatter-section" class="frontmatter-banner hidden">
+          <div id="frontmatter" class="frontmatter"></div>
+        </div>
+        <div id="readme-body" class="markdown-body"></div>
+      </div>
+      <aside class="readme-sidebar">
+        <nav id="toc-section" class="sidebar-section toc hidden" aria-label="Table of contents">
+          <p class="sidebar-title">Contents</p>
+        </nav>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/docs">API Docs</a> <span class="footer-sep">&middot;</span>
+    <a href="/login" class="footer-admin">Admin</a> <span class="footer-sep">&middot;</span>
+    <a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>
+    <br>
+    <span class="footer-meta">
+      <span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>
+      <span class="footer-sep">&middot;</span>
+      <span id="ft-info"></span>
+    </span>
+  </footer>
+  <script>(function(){fetch("/api/health").then(function(r){return r.json()}).then(function(d){document.getElementById("ft-dot").classList.remove("offline");document.getElementById("ft-status").textContent="Healthy";var v=d.version?"v"+d.version:"";document.getElementById("ft-info").textContent=v}).catch(function(){document.getElementById("ft-status").textContent="Offline"});fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){var n=(d.experiments||[]).length;var info=document.getElementById("ft-info");if(n>0)info.textContent=(info.textContent?info.textContent+" \u00b7 ":"")+"Serving "+n+" experiment"+(n!==1?"s":"")}).catch(function(){})})()</script>
+  <link id="hljs-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/atom-one-light.min.css">
+  <script>
+    (function() {
+      var link = document.getElementById("hljs-theme");
+      function setHljsTheme() {
+        var dark = document.documentElement.classList.contains("dark");
+        link.href = dark
+          ? "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/a11y-dark.min.css"
+          : "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/atom-one-light.min.css";
+      }
+      setHljsTheme();
+      new MutationObserver(function() { setHljsTheme(); })
+        .observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    (async function () {
+      var expName = new URLSearchParams(window.location.search).get("exp") || "default";
+      document.getElementById("dash-link").href = "/exp/" + expName + "/ui/dashboard.html";
+      document.getElementById("calllog-link").href = "/exp/" + expName + "/ui/call-log.html";
+      document.getElementById("functions-link").href = "/static/functions.html?exp=" + expName;
+      document.getElementById("students-link").href = "/static/students.html?exp=" + expName;
+      document.getElementById("logs-link").href = "/static/logs.html?exp=" + expName;
+      document.getElementById("bc-exp-link").href = "/exp/" + expName + "/ui/dashboard.html";
+      document.getElementById("bc-exp-link").textContent = expName;
+
+      fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){
+        var exp = (d.experiments||[]).find(function(e){return e.name===expName});
+        if(exp) {
+          if(exp.entry_point) document.getElementById("dash-link").href="/exp/"+expName+"/ui/"+exp.entry_point;
+          var sc = exp.student_count || 0;
+          document.getElementById("students-link").textContent = "Students (" + sc + ")";
+          var fc = exp.function_count || 0;
+          document.getElementById("functions-link").textContent = "Functions (" + fc + ")";
+        }
+      }).catch(function(){});
+      fetch("/exp/"+expName+"/log-options").then(function(r){return r.json()}).then(function(opts){
+        var lc = opts.log_count || 0;
+        document.getElementById("logs-link").textContent = "Logs (" + lc + ")";
+      }).catch(function(){});
+
+      var loadingEl = document.getElementById("loading");
+      var errorEl = document.getElementById("error");
+      var layoutEl = document.getElementById("readme-layout");
+      var fmBanner = document.getElementById("frontmatter-section");
+      var fmEl = document.getElementById("frontmatter");
+      var bodyEl = document.getElementById("readme-body");
+
+      var DISPLAY_KEYS = {
+        name: "Name",
+        display_name: "Display Name",
+        description: "Description",
+        entry_point: "Entry Point",
+        require_registration: "Registration Required",
+        leap_version: "LEAP Version"
+      };
+
+      try {
+        var res = await fetch("/exp/" + expName + "/readme");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        var data = await res.json();
+        loadingEl.classList.add("hidden");
+        layoutEl.style.display = "";
+
+        var fm = data.frontmatter || {};
+        var keys = Object.keys(fm);
+        if (keys.length > 0) {
+          fmBanner.classList.remove("hidden");
+          keys.forEach(function (k) {
+            var keyEl = document.createElement("span");
+            keyEl.className = "fm-key";
+            keyEl.textContent = DISPLAY_KEYS[k] || k;
+            var valEl = document.createElement("span");
+            valEl.className = "fm-val";
+            valEl.textContent = String(fm[k]);
+            fmEl.appendChild(keyEl);
+            fmEl.appendChild(valEl);
+          });
+        }
+
+        bodyEl.innerHTML = marked.parse(data.body || "");
+        if (window.hljs) hljs.highlightAll();
+
+        bodyEl.querySelectorAll("pre code").forEach(function (block) {
+          var lines = block.innerHTML.split("\n");
+          if (lines[lines.length - 1].trim() === "") lines.pop();
+          block.innerHTML = lines.map(function (line, i) {
+            return '<span class="line-num">' + (i + 1) + '</span>' + line;
+          }).join("\n");
+        });
+
+        var tocEl = document.getElementById("toc-section");
+        var headings = bodyEl.querySelectorAll("h1, h2, h3, h4");
+        if (headings.length > 1) {
+          var minLevel = Math.min.apply(null, Array.from(headings).map(function (h) { return parseInt(h.tagName[1], 10); }));
+          var rootOl = document.createElement("ol");
+          var currentOl = rootOl;
+          var currentLevel = minLevel;
+          var olStack = [];
+
+          headings.forEach(function (h) {
+            var level = parseInt(h.tagName[1], 10);
+            var id = h.id || h.textContent.trim().toLowerCase()
+              .replace(/[^\w\s-]/g, "").replace(/\s+/g, "-");
+            h.id = id;
+
+            while (currentLevel < level) {
+              var newOl = document.createElement("ol");
+              var lastLi = currentOl.lastElementChild;
+              if (!lastLi) { lastLi = document.createElement("li"); currentOl.appendChild(lastLi); }
+              lastLi.appendChild(newOl);
+              olStack.push(currentOl);
+              currentOl = newOl;
+              currentLevel++;
+            }
+
+            while (currentLevel > level) {
+              currentOl = olStack.pop();
+              currentLevel--;
+            }
+
+            var li = document.createElement("li");
+            var a = document.createElement("a");
+            a.href = "#" + id;
+            a.textContent = h.textContent;
+            li.appendChild(a);
+            currentOl.appendChild(li);
+          });
+
+          tocEl.appendChild(rootOl);
+          tocEl.classList.remove("hidden");
+
+          var tocLinks = tocEl.querySelectorAll("a");
+          var headingEls = Array.from(headings);
+          function updateActive() {
+            var scrollY = window.scrollY + 100;
+            var current = null;
+            headingEls.forEach(function (h) {
+              if (h.offsetTop <= scrollY) current = h.id;
+            });
+            tocLinks.forEach(function (a) {
+              a.classList.toggle("toc-active", a.getAttribute("href") === "#" + current);
+            });
+          }
+          window.addEventListener("scroll", updateActive, { passive: true });
+          updateActive();
+        }
+      } catch (err) {
+        loadingEl.classList.add("hidden");
+        errorEl.textContent = "Failed to load README: " + err.message;
+        errorEl.classList.remove("hidden");
+      }
+    })();
+  </script>
+</body>
+</html>

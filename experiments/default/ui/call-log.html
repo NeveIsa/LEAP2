@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Real-time call log viewer for LEAP2 experiments.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+  <title>Call Log — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+</head>
+<body>
+  <a class="skip-to-content" href="#main">Skip to content</a>
+
+  <nav class="navbar">
+    <a class="navbar-brand" href="/"><span>LEAP</span>2</a>
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="navbar-links">
+      <a href="#" id="dash-link" class="nav-lab">Lab</a>
+      <span class="nav-divider"></span>
+      <a href="#" id="students-link" class="nav-shared">Students</a>
+      <a href="#" id="logs-link" class="nav-shared">Logs</a>
+      <a href="#" id="functions-link" class="nav-shared">Functions</a>
+      <a href="#" id="readme-link" class="nav-shared">README</a>
+      <a href="/" class="nav-shared">All Experiments</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="#" id="bc-exp-link">default</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Call Log</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Call Log <span class="auto-badge" id="auto-label"></span></h1>
+      <p>Real-time view of RPC call logs</p>
+    </div>
+
+    <div id="error" class="alert alert-error hidden"></div>
+
+    <div class="controls">
+      <div class="form-group">
+        <label class="form-label" for="filter-student">Student</label>
+        <select class="input" id="filter-student"><option value="">All</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="filter-func">Function</label>
+        <select class="input" id="filter-func"><option value="">All</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="filter-trial">Trial</label>
+        <select class="input" id="filter-trial"><option value="">All</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="filter-n">Rows</label>
+        <input class="input" type="number" id="filter-n" value="50" min="1" max="10000" style="width:80px">
+      </div>
+      <div class="form-group" style="display:flex; gap:0.5rem;">
+        <button class="btn btn-primary" id="refresh-btn">Refresh</button>
+        <button class="btn" id="auto-btn">Auto: Off</button>
+      </div>
+    </div>
+
+    <div id="status" class="log-status"></div>
+
+    <div class="table-wrap">
+      <table class="table" id="log-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Time</th>
+            <th>Student</th>
+            <th>Function</th>
+            <th>Args</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody id="log-body"></tbody>
+      </table>
+    </div>
+
+    <div id="empty" class="empty-state hidden">
+      <h2>No logs yet</h2>
+      <p>Make some RPC calls to see them appear here.</p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/docs">API Docs</a> <span class="footer-sep">&middot;</span>
+    <a href="/login" class="footer-admin">Admin</a> <span class="footer-sep">&middot;</span>
+    <a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>
+    <br>
+    <span class="footer-meta">
+      <span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>
+      <span class="footer-sep">&middot;</span>
+      <span id="ft-info"></span>
+    </span>
+  </footer>
+  <script>(function(){fetch("/api/health").then(function(r){return r.json()}).then(function(d){document.getElementById("ft-dot").classList.remove("offline");document.getElementById("ft-status").textContent="Healthy";var v=d.version?"v"+d.version:"";document.getElementById("ft-info").textContent=v}).catch(function(){document.getElementById("ft-status").textContent="Offline"});fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){var n=(d.experiments||[]).length;var info=document.getElementById("ft-info");if(n>0)info.textContent=(info.textContent?info.textContent+" \u00b7 ":"")+"Serving "+n+" experiment"+(n!==1?"s":"")}).catch(function(){})})()</script>
+  <script type="module">
+    import { LogClient } from "/static/logclient.js";
+
+    let client;
+    let autoInterval = null;
+
+    const expName = (function () {
+      const m = window.location.pathname.match(/\/exp\/([^/]+)/);
+      if (m) return m[1];
+      return new URLSearchParams(window.location.search).get("exp") || "default";
+    })();
+
+    document.getElementById("dash-link").href = "/exp/" + expName + "/ui/dashboard.html";
+    document.getElementById("functions-link").href = "/static/functions.html?exp=" + expName;
+    document.getElementById("students-link").href = "/static/students.html?exp=" + expName;
+    document.getElementById("logs-link").href = "/static/logs.html?exp=" + expName;
+    document.getElementById("readme-link").href = "/static/readme.html?exp=" + expName;
+    document.getElementById("bc-exp-link").href = "/exp/" + expName + "/ui/dashboard.html";
+    document.getElementById("bc-exp-link").textContent = expName;
+
+    try {
+      client = new LogClient({ experiment: expName });
+    } catch (e) {
+      document.getElementById("error").textContent = e.message;
+      document.getElementById("error").classList.remove("hidden");
+    }
+
+    const studentSel = document.getElementById("filter-student");
+    const funcSel = document.getElementById("filter-func");
+    const trialSel = document.getElementById("filter-trial");
+    const nInput = document.getElementById("filter-n");
+    const bodyEl = document.getElementById("log-body");
+    const statusEl = document.getElementById("status");
+    const emptyEl = document.getElementById("empty");
+    const tableEl = document.getElementById("log-table");
+    const errorEl = document.getElementById("error");
+    const autoBtn = document.getElementById("auto-btn");
+    const autoLabel = document.getElementById("auto-label");
+
+    async function loadOptions() {
+      if (!client) return;
+      try {
+        const opts = await client.getLogOptions();
+        (opts.students || []).forEach(function (s) {
+          const o = document.createElement("option");
+          o.value = s;
+          o.textContent = s;
+          studentSel.appendChild(o);
+        });
+        (opts.trials || []).forEach(function (t) {
+          const o = document.createElement("option");
+          o.value = t;
+          o.textContent = t;
+          trialSel.appendChild(o);
+        });
+      } catch (_) {}
+
+      try {
+        const res = await fetch("/exp/" + expName + "/functions");
+        if (res.ok) {
+          const funcs = await res.json();
+          Object.keys(funcs).sort().forEach(function (name) {
+            const o = document.createElement("option");
+            o.value = name;
+            o.textContent = name;
+            funcSel.appendChild(o);
+          });
+        }
+      } catch (_) {}
+    }
+
+    async function loadLogs() {
+      if (!client) return;
+      errorEl.classList.add("hidden");
+      const filters = {};
+      if (studentSel.value) filters.studentId = studentSel.value;
+      if (funcSel.value) filters.funcName = funcSel.value;
+      if (trialSel.value) filters.trial = trialSel.value;
+      filters.n = parseInt(nInput.value, 10) || 50;
+      filters.order = "latest";
+
+      try {
+        const { logs } = await client.getLogs(filters);
+        bodyEl.innerHTML = "";
+
+        if (!logs || logs.length === 0) {
+          tableEl.classList.add("hidden");
+          emptyEl.classList.remove("hidden");
+          statusEl.textContent = "0 entries";
+          return;
+        }
+
+        tableEl.classList.remove("hidden");
+        emptyEl.classList.add("hidden");
+        statusEl.textContent = logs.length + " entr" + (logs.length === 1 ? "y" : "ies");
+
+        logs.forEach(function (log) {
+          const tr = document.createElement("tr");
+
+          const tdId = document.createElement("td");
+          tdId.textContent = log.id;
+          tdId.style.fontFamily = "var(--font-mono)";
+          tdId.style.fontSize = "0.8125rem";
+
+          const tdTs = document.createElement("td");
+          tdTs.className = "log-ts";
+          const d = new Date(log.ts);
+          tdTs.textContent = d.toLocaleTimeString() + " " + d.toLocaleDateString();
+
+          const tdStu = document.createElement("td");
+          tdStu.textContent = log.student_id;
+          tdStu.style.fontSize = "0.875rem";
+
+          const tdFunc = document.createElement("td");
+          tdFunc.innerHTML = "<code>" + (log.func_name || "") + "</code>";
+
+          const tdArgs = document.createElement("td");
+          tdArgs.className = "log-args";
+          tdArgs.textContent = JSON.stringify(log.args);
+          tdArgs.title = JSON.stringify(log.args, null, 2);
+
+          const tdResult = document.createElement("td");
+          if (log.error) {
+            tdResult.className = "log-result log-error";
+            tdResult.textContent = log.error;
+            tdResult.title = log.error;
+          } else {
+            tdResult.className = "log-result";
+            tdResult.textContent = JSON.stringify(log.result);
+            tdResult.title = JSON.stringify(log.result, null, 2);
+          }
+
+          tr.appendChild(tdId);
+          tr.appendChild(tdTs);
+          tr.appendChild(tdStu);
+          tr.appendChild(tdFunc);
+          tr.appendChild(tdArgs);
+          tr.appendChild(tdResult);
+          bodyEl.appendChild(tr);
+        });
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.remove("hidden");
+      }
+    }
+
+    function toggleAuto() {
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        autoBtn.textContent = "Auto: Off";
+        autoLabel.textContent = "";
+      } else {
+        autoInterval = setInterval(loadLogs, 3000);
+        autoBtn.textContent = "Auto: On";
+        autoLabel.textContent = "(refreshing every 3s)";
+      }
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", loadLogs);
+    autoBtn.addEventListener("click", toggleAuto);
+
+    loadOptions().then(loadLogs);
+  </script>
+</body>
+</html>
