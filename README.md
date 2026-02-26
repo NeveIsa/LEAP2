@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="./banner.svg" alt="LEAP2 Banner" width="800">
+</div>
+
 # LEAP2
 
 **Live Experiments for Active Pedagogy** — An interactive learning platform that exposes Python functions as RPC endpoints, logs every call, and serves per-experiment UIs for analysis and visualization.
