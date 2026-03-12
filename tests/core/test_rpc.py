@@ -297,3 +297,89 @@ class TestExecuteRPCOpenExperiment:
             rpc.execute_rpc(exp, session, func_name="echo", args=[sid], student_id=sid)
         logs = storage.query_logs(session)
         assert len(logs) == 3
+
+
+# ── Rate Limiting ──
+
+
+class TestRateLimiting:
+    @pytest.fixture(autouse=True)
+    def enable_rate_limiting(self, monkeypatch):
+        """Enable rate limiting for these tests (conftest disables it globally)."""
+        monkeypatch.setenv("LEAP_RATE_LIMIT", "1")
+        # Clear the global rate windows between tests
+        rpc._rate_windows.clear()
+
+    def test_ratelimit_decorator_sets_attribute(self):
+        @rpc.ratelimit("10/minute")
+        def fn(): pass
+        assert fn._leap_ratelimit == "10/minute"
+
+    def test_ratelimit_false_disables(self):
+        @rpc.ratelimit(False)
+        def fn(): pass
+        assert fn._leap_ratelimit is False
+
+    def test_ratelimit_preserves_function(self):
+        @rpc.ratelimit("5/second")
+        def calc(x): return x * 3
+        assert calc(4) == 12
+
+    def test_rate_limit_enforced(self, open_exp_with_session):
+        exp, session = open_exp_with_session
+
+        @rpc.ratelimit("2/minute")
+        def limited(x): return x
+        exp.functions["limited"] = limited
+
+        # First 2 calls succeed
+        assert rpc.execute_rpc(exp, session, func_name="limited", args=[1], student_id="s1") == 1
+        assert rpc.execute_rpc(exp, session, func_name="limited", args=[2], student_id="s1") == 2
+
+        # 3rd call exceeds limit
+        with pytest.raises(rpc.RateLimitError, match="Rate limit exceeded"):
+            rpc.execute_rpc(exp, session, func_name="limited", args=[3], student_id="s1")
+
+    def test_ratelimit_false_unlimited(self, open_exp_with_session):
+        exp, session = open_exp_with_session
+
+        @rpc.ratelimit(False)
+        def unlimited(x): return x
+        exp.functions["unlimited"] = unlimited
+
+        # Many calls all succeed
+        for i in range(50):
+            assert rpc.execute_rpc(exp, session, func_name="unlimited", args=[i], student_id="s1") == i
+
+    def test_different_students_independent(self, open_exp_with_session):
+        exp, session = open_exp_with_session
+
+        @rpc.ratelimit("2/minute")
+        def limited(x): return x
+        exp.functions["limited"] = limited
+
+        # Student A uses up their limit
+        rpc.execute_rpc(exp, session, func_name="limited", args=[1], student_id="alice")
+        rpc.execute_rpc(exp, session, func_name="limited", args=[2], student_id="alice")
+        with pytest.raises(rpc.RateLimitError):
+            rpc.execute_rpc(exp, session, func_name="limited", args=[3], student_id="alice")
+
+        # Student B is independent — still has quota
+        assert rpc.execute_rpc(exp, session, func_name="limited", args=[1], student_id="bob") == 1
+        assert rpc.execute_rpc(exp, session, func_name="limited", args=[2], student_id="bob") == 2
+
+    def test_default_rate_limit_applied(self, open_exp_with_session):
+        """Functions without @ratelimit get the default limit."""
+        exp, session = open_exp_with_session
+        # echo has no @ratelimit decorator — should use default (120/minute)
+        func = exp.functions["echo"]
+        assert not hasattr(func, "_leap_ratelimit")
+        # Should succeed (well under 120/minute)
+        for i in range(5):
+            rpc.execute_rpc(exp, session, func_name="echo", args=[i], student_id="s1")
+
+    def test_parse_limit_various_periods(self):
+        assert rpc._parse_limit("10/second") == (10, 1)
+        assert rpc._parse_limit("60/minute") == (60, 60)
+        assert rpc._parse_limit("100/hour") == (100, 3600)
+        assert rpc._parse_limit("1000/day") == (1000, 86400)

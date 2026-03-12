@@ -11,6 +11,7 @@ from leap.core.experiment import (
     parse_frontmatter,
     load_functions,
     get_function_info,
+    check_leap_version,
     ExperimentInfo,
     discover_experiments,
 )
@@ -71,7 +72,7 @@ class TestFrontmatter:
 
     def test_parse_missing_file(self, tmp_path: Path):
         fm = parse_frontmatter(tmp_path / "nope.md")
-        assert fm["entry_point"] == "dashboard.html"
+        assert fm["entry_point"] == "readme"
         assert fm["require_registration"] is True
         assert fm["display_name"] == ""
         assert fm["description"] == ""
@@ -92,7 +93,7 @@ class TestFrontmatter:
         readme = tmp_path / "README.md"
         readme.write_text("---\n---\n# Nothing\n")
         fm = parse_frontmatter(readme)
-        assert fm["entry_point"] == "dashboard.html"
+        assert fm["entry_point"] == "readme"
         assert fm["require_registration"] is True
 
     def test_parse_extra_unknown_fields(self, tmp_path: Path):
@@ -107,7 +108,7 @@ class TestFrontmatter:
         readme.write_text("---\nname: partial\n---\n")
         fm = parse_frontmatter(readme)
         assert fm["name"] == "partial"
-        assert fm["entry_point"] == "dashboard.html"
+        assert fm["entry_point"] == "readme"
         assert fm["require_registration"] is True
 
     def test_parse_unclosed_frontmatter(self, tmp_path: Path):
@@ -116,6 +117,47 @@ class TestFrontmatter:
         fm = parse_frontmatter(readme)
         assert fm["require_registration"] is True
         assert "name" not in fm  # defaults only
+
+
+# ── Version Check ──
+
+
+class TestCheckLeapVersion:
+    def test_empty_requirement(self):
+        ok, msg = check_leap_version("")
+        assert ok is True
+
+    def test_gte_satisfied(self):
+        ok, msg = check_leap_version(">=1.0")
+        assert ok is True
+        assert ">=" in msg
+
+    def test_gte_not_satisfied(self):
+        ok, msg = check_leap_version(">=99.0")
+        assert ok is False
+        assert "99.0" in msg
+
+    def test_gt_not_satisfied(self):
+        # Current version is 1.0.0, so >1.0.0 should fail
+        ok, msg = check_leap_version(">1.0.0")
+        assert ok is False
+
+    def test_eq_satisfied(self):
+        from leap import __version__
+        ok, msg = check_leap_version(f"=={__version__}")
+        assert ok is True
+
+    def test_eq_not_satisfied(self):
+        ok, msg = check_leap_version("==99.0.0")
+        assert ok is False
+
+    def test_bare_version_treated_as_gte(self):
+        ok, msg = check_leap_version("1.0")
+        assert ok is True
+
+    def test_bare_version_too_high(self):
+        ok, msg = check_leap_version("99.0")
+        assert ok is False
 
 
 # ── Function Loading ──
@@ -283,7 +325,7 @@ class TestExperimentInfo:
         exp = ExperimentInfo("noreadme", exp_dir)
         assert exp.display_name == "noreadme"  # fallback to folder name
         assert exp.require_registration is True
-        assert exp.entry_point == "dashboard.html"
+        assert exp.entry_point == "readme"
 
     def test_missing_funcs_dir(self, tmp_path: Path):
         exp_dir = tmp_path / "experiments" / "nofuncs"
@@ -295,6 +337,27 @@ class TestExperimentInfo:
     def test_db_path(self, tmp_root: Path):
         exp = ExperimentInfo("default", tmp_root / "experiments" / "default")
         assert exp.db_path == tmp_root / "experiments" / "default" / "db" / "experiment.db"
+
+    def test_version_ok_when_satisfied(self, tmp_root: Path):
+        exp = ExperimentInfo("default", tmp_root / "experiments" / "default")
+        assert exp.version_ok is True
+
+    def test_version_fails_when_too_high(self, tmp_path: Path):
+        exp_dir = tmp_path / "experiments" / "future"
+        (exp_dir / "funcs").mkdir(parents=True)
+        (exp_dir / "db").mkdir()
+        (exp_dir / "README.md").write_text(
+            "---\nname: future\nleap_version: '>=99.0'\n---\n"
+        )
+        exp = ExperimentInfo("future", exp_dir)
+        assert exp.version_ok is False
+        assert "99.0" in exp.version_message
+
+    def test_metadata_includes_version_fields(self, tmp_root: Path):
+        exp = ExperimentInfo("default", tmp_root / "experiments" / "default")
+        meta = exp.to_metadata()
+        assert "leap_version" in meta
+        assert "leap_version_ok" in meta
 
 
 # ── Discovery ──

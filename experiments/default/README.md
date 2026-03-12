@@ -3,14 +3,14 @@ name: default
 display_name: Default Lab
 description: Starter experiment demonstrating LEAP2 features — RPC, logging, decorators, and registration.
 version: "1.0.0"
-entry_point: dashboard.html
+entry_point: readme
 leap_version: ">=1.0"
 require_registration: true
 ---
 
 # Default Lab
 
-A starter experiment bundled with LEAP2 that exercises all core features: RPC calls, automatic logging, `@nolog` for high-frequency functions, `@noregcheck` for open functions, and student registration.
+A starter experiment bundled with LEAP2 that exercises all core features: RPC calls, automatic logging, `@nolog` for high-frequency functions, `@noregcheck` for open functions, `@ratelimit` for rate control, and student registration.
 
 Use this experiment to verify your setup, learn the client API, and as a reference when building your own experiments.
 
@@ -19,8 +19,16 @@ Use this experiment to verify your setup, learn the client API, and as a referen
 - **`funcs/math_funcs.py`** — Standard logged functions (square, cubic, add, rosenbrock, bisect, gradient_step). Require registration.
 - **`funcs/simulation.py`** — High-frequency functions marked `@nolog` (step, get_position) plus a logged `reset`. Demonstrates selective logging.
 - **`funcs/open_funcs.py`** — Utility functions marked `@noregcheck` (echo, ping, server_time). Callable without registration, still logged.
-- **`ui/dashboard.html`** — Experiment dashboard showing available functions and quick-start code.
-- **`ui/call-log.html`** — Real-time call log viewer using the LogClient.
+- **README (default entry)** — This page; open at `/static/readme.html?exp=default`. **`ui/dashboard.html`** — Experiment dashboard (set `entry_point: dashboard.html` to open it by default).
+- **Logs** — View real-time logs at `/static/logs.html?exp=default`.
+
+### Available Decorators
+
+All three decorators can be used in your experiment functions:
+
+- **`@nolog`** — Skip logging (used in `simulation.py`)
+- **`@noregcheck`** — Skip registration check (used in `open_funcs.py`)
+- **`@ratelimit("N/period")`** — Override default rate limit (120/minute). Period must be one of `second`, `minute`, `hour`, `day`. Examples: `@ratelimit("10/minute")`, `@ratelimit("5/second")`, `@ratelimit("1000/hour")`. Use `@ratelimit(False)` to disable. Not used in this experiment but available for your own functions.
 
 Browse all functions with their signatures, docs, and decorator flags at `/static/functions.html?exp=default`.
 
@@ -41,9 +49,9 @@ leap add-student default s001 --name "Alice"
 **3. Try the Python client:**
 
 ```python
-from leap.client import RPCClient
+from leap.client import Client
 
-client = RPCClient("http://localhost:9000", student_id="s001", experiment="default")
+client = Client("http://localhost:9000", student_id="s001", experiment="default")
 
 # These calls are logged (require registration)
 client.square(7)           # 49
@@ -60,7 +68,7 @@ help(client.square)
 
 ```python
 # Use any student_id — @noregcheck skips the check
-client2 = RPCClient("http://localhost:9000", student_id="guest", experiment="default")
+client2 = Client("http://localhost:9000", student_id="guest", experiment="default")
 client2.echo("hello")     # "hello"
 client2.ping()             # "pong"
 ```
@@ -98,3 +106,20 @@ leap add-student default s001 --name "Alice"
 leap add-student default s002 --name "Bob"
 leap add-student default s003 --name "Charlie"
 ```
+
+Or bulk-import from a CSV file:
+
+```bash
+leap import-students default students.csv
+```
+
+CSV format (`student_id` header required; `name` and `email` optional):
+
+```csv
+student_id,name,email
+s001,Alice Smith,alice@univ.edu
+s002,Bob Johnson,
+s003,Charlie Lee,charlie@univ.edu
+```
+
+You can also bulk-import from the Students UI page (`/static/students.html?exp=default`) using file upload or paste.

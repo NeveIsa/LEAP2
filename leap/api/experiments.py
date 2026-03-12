@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+import logging
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from leap.api.deps import get_db_session, get_experiment_info, limiter
 from leap.core import auth, storage
+from leap.core.experiment import ExperimentInfo
 from leap import __version__
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -19,37 +26,61 @@ async def list_experiments(request: Request):
         meta = exp.to_metadata()
         try:
             session = storage.get_session(exp.name, exp.db_path)
-            meta["student_count"] = storage.count_students(session)
-            session.close()
+            try:
+                meta["student_count"] = storage.count_students(session)
+            finally:
+                session.close()
         except Exception:
+            logger.exception("Failed to count students for experiment '%s'", exp.name)
             meta["student_count"] = 0
         result.append(meta)
     return {"experiments": result}
 
 
 @router.get("/api/health")
-async def health():
-    return {"ok": True, "version": __version__}
+async def health(request: Request):
+    experiments = getattr(request.app.state, "experiments", {})
+    exp_status = {}
+    all_ok = True
+    for name, exp in experiments.items():
+        try:
+            session = storage.get_session(exp.name, exp.db_path)
+            try:
+                exp_status[name] = {
+                    "ok": True,
+                    "students": storage.count_students(session),
+                    "logs": storage.count_logs(session),
+                    "db_path": str(exp.db_path),
+                }
+            finally:
+                session.close()
+        except Exception:
+            logger.exception("Health check failed for experiment '%s'", name)
+            all_ok = False
+            exp_status[name] = {"ok": False, "error": "db_unreachable"}
+    return {
+        "ok": all_ok,
+        "version": __version__,
+        "experiment_count": len(experiments),
+        "experiments": exp_status,
+    }
 
 
 @router.get("/exp/{experiment}/functions")
-async def list_functions(experiment: str, request: Request):
-    experiments = request.app.state.experiments
-    if experiment not in experiments:
-        raise HTTPException(404, detail=f"Experiment '{experiment}' not found")
-    return experiments[experiment].get_functions_info()
+async def list_functions(
+    exp_info: ExperimentInfo = Depends(get_experiment_info),
+):
+    return exp_info.get_functions_info()
 
 
 @router.get("/exp/{experiment}/readme")
-async def get_readme(experiment: str, request: Request):
-    experiments = request.app.state.experiments
-    if experiment not in experiments:
-        raise HTTPException(404, detail=f"Experiment '{experiment}' not found")
-    exp = experiments[experiment]
-    if not exp.readme_path.exists():
+async def get_readme(
+    exp_info: ExperimentInfo = Depends(get_experiment_info),
+):
+    if not exp_info.readme_path.exists():
         raise HTTPException(404, detail="No README found for this experiment")
-    text = exp.readme_path.read_text(encoding="utf-8")
-    frontmatter = dict(exp.frontmatter)
+    text = exp_info.readme_path.read_text(encoding="utf-8")
+    frontmatter = dict(exp_info.frontmatter)
     body = text
     if text.startswith("---"):
         parts = text.split("---", 2)
@@ -59,18 +90,12 @@ async def get_readme(experiment: str, request: Request):
 
 
 @router.get("/exp/{experiment}/is-registered")
-async def is_registered(experiment: str, student_id: str = Query(...), request: Request = None):
-    experiments = request.app.state.experiments
-    if experiment not in experiments:
-        raise HTTPException(404, detail=f"Experiment '{experiment}' not found")
-
-    exp_info = experiments[experiment]
-    session = storage.get_session(experiment, exp_info.db_path)
-    try:
-        registered = storage.is_registered(session, student_id)
-        return {"registered": registered}
-    finally:
-        session.close()
+async def is_registered(
+    student_id: str = Query(...),
+    session: Session = Depends(get_db_session),
+):
+    registered = storage.is_registered(session, student_id)
+    return {"registered": registered}
 
 
 class LoginRequest(BaseModel):
@@ -78,6 +103,7 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
+@limiter.limit("5/minute")
 async def login(body: LoginRequest, request: Request):
     root = getattr(request.app.state, "root", None)
     cred = auth.load_credentials(root)

@@ -50,7 +50,7 @@ class TestLandingRedirect:
             with TestClient(app, raise_server_exceptions=False) as c:
                 resp = c.get("/", follow_redirects=False)
                 assert resp.status_code == 307
-                assert "/exp/default/ui/dashboard.html" in resp.headers["location"]
+                assert "/static/readme.html?exp=default" in resp.headers["location"]
             storage.close_all_engines()
 
     def test_no_redirect_when_default_experiment_not_found(self, tmp_credentials):
@@ -67,18 +67,15 @@ class TestLandingRedirect:
 
 
 class TestLoginPage:
-    def test_login_page_returns_html(self, client):
-        resp = client.get("/login")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
+    def test_login_redirects_to_landing(self, client):
+        resp = client.get("/login", follow_redirects=False)
+        assert resp.status_code == 307
+        assert resp.headers["location"] == "/"
 
-    def test_login_page_has_form(self, client):
-        resp = client.get("/login")
-        assert "login-form" in resp.text
-
-    def test_login_page_has_password_field(self, client):
-        resp = client.get("/login")
-        assert "password" in resp.text
+    def test_login_post_still_works(self, client):
+        """POST /login is the API endpoint — still returns JSON."""
+        resp = client.post("/login", json={"password": "wrong"})
+        assert resp.status_code == 401
 
 
 class TestSharedAssets:

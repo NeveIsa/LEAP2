@@ -120,14 +120,17 @@ class LogClient:
         return all_logs
 
     def _get(self, url: str, params: dict | None = None) -> dict:
-        resp = requests.get(url, params=params)
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"LogClient: network error: {e}") from e
         if resp.status_code != 200:
             detail = f"HTTP {resp.status_code}"
             try:
                 body = resp.json()
                 if "detail" in body:
                     detail = body["detail"]
-            except Exception:
+            except (ValueError, KeyError):
                 pass
             raise RuntimeError(f"LogClient: {detail}")
         return resp.json()

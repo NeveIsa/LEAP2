@@ -36,17 +36,6 @@
     </div>
   </div>
 
-  <footer class="site-footer">
-    <a href="/docs">API Docs</a> <span class="footer-sep">&middot;</span>
-    <a href="/login" class="footer-admin">Admin</a> <span class="footer-sep">&middot;</span>
-    <a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>
-    <br>
-    <span class="footer-meta">
-      <span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>
-      <span class="footer-sep">&middot;</span>
-      <span id="ft-info"></span>
-    </span>
-  </footer>
-  <script>(function(){fetch("/api/health").then(function(r){return r.json()}).then(function(d){document.getElementById("ft-dot").classList.remove("offline");document.getElementById("ft-status").textContent="Healthy";var v=d.version?"v"+d.version:"";document.getElementById("ft-info").textContent=v}).catch(function(){document.getElementById("ft-status").textContent="Offline"});fetch("/api/experiments").then(function(r){return r.json()}).then(function(d){var n=(d.experiments||[]).length;var info=document.getElementById("ft-info");if(n>0)info.textContent=(info.textContent?info.textContent+" \u00b7 ":"")+"Serving "+n+" experiment"+(n!==1?"s":"")}).catch(function(){})})()</script>
+  <script src="/static/footer.js"></script>
 </body>
 </html>

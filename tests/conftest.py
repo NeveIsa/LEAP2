@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
+
+# Disable rate limiting during tests
+os.environ.setdefault("LEAP_RATE_LIMIT", "0")
 
 
 @pytest.fixture
@@ -22,7 +26,7 @@ def tmp_root(tmp_path: Path) -> Path:
         "name: default\n"
         "display_name: Test Lab\n"
         "description: Test experiment\n"
-        "entry_point: dashboard.html\n"
+        "entry_point: readme\n"
         "require_registration: true\n"
         "---\n\n# Test\n"
     )
@@ -92,13 +96,6 @@ def tmp_root(tmp_path: Path) -> Path:
     (ui_landing / "index.html").write_text(
         "<!DOCTYPE html><html><head><title>LEAP2</title></head>"
         "<body><h1>LEAP2</h1><div id=\"experiments\"></div></body></html>\n"
-    )
-
-    ui_login = tmp_path / "ui" / "login"
-    ui_login.mkdir(parents=True)
-    (ui_login / "index.html").write_text(
-        "<!DOCTYPE html><html><head><title>Login</title></head>"
-        "<body><form id=\"login-form\"><input type=\"password\" name=\"password\"></form></body></html>\n"
     )
 
     # Experiment UI placeholder

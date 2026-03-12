@@ -41,8 +41,12 @@ def load_credentials(root: Path | None = None) -> dict | None:
     path = credentials_path(root)
     if not path.exists():
         return None
-    with open(path) as f:
-        return json.load(f)
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("Failed to read credentials from %s: %s", path, e)
+        return None
 
 
 def save_credentials(cred: dict, root: Path | None = None) -> None:
@@ -50,6 +54,7 @@ def save_credentials(cred: dict, root: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(cred, f, indent=2)
+    os.chmod(path, 0o600)
     logger.info("Credentials saved to %s", path)
 
 

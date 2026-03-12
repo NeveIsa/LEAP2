@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
+import os
 import re
+import time
+from collections import defaultdict
 from typing import Any
 
 from leap.core import storage
@@ -12,6 +14,41 @@ from leap.core import storage
 logger = logging.getLogger(__name__)
 
 STUDENT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,255}$")
+
+DEFAULT_RATE_LIMIT = "120/minute"
+
+
+def ratelimit(limit):
+    """Decorator: set per-student rate limit. Pass a string like "10/minute" or False to disable."""
+    def decorator(func):
+        func._leap_ratelimit = limit
+        return func
+    return decorator
+
+
+class RateLimitError(Exception):
+    """Raised when a per-function rate limit is exceeded."""
+
+
+_rate_windows: dict[tuple, list[float]] = defaultdict(list)
+_PERIODS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+
+
+def _parse_limit(limit_str: str) -> tuple[int, int]:
+    count, period = limit_str.strip().split("/")
+    return int(count), _PERIODS[period]
+
+
+def _check_rate_limit(key: tuple, limit_str: str) -> bool:
+    max_calls, window = _parse_limit(limit_str)
+    now = time.monotonic()
+    timestamps = _rate_windows[key]
+    cutoff = now - window
+    _rate_windows[key] = [t for t in timestamps if t > cutoff]
+    if len(_rate_windows[key]) >= max_calls:
+        return False
+    _rate_windows[key].append(now)
+    return True
 
 
 def nolog(func):
@@ -58,6 +95,17 @@ def execute_rpc(
         if not storage.is_registered(session, student_id):
             raise PermissionError(f"Student '{student_id}' is not registered")
 
+    # Rate limiting
+    env_limit = os.environ.get("LEAP_RATE_LIMIT")
+    if env_limit != "0":
+        limit_val = getattr(func, "_leap_ratelimit", "default")
+        if limit_val == "default":
+            limit_val = DEFAULT_RATE_LIMIT
+        if limit_val:
+            key = (experiment.name, func_name, student_id)
+            if not _check_rate_limit(key, limit_val):
+                raise RateLimitError(f"Rate limit exceeded for '{func_name}': {limit_val}")
+
     args = args or []
     kwargs = kwargs or {}
     error_msg = None
@@ -67,7 +115,7 @@ def execute_rpc(
         result = func(*args, **kwargs)
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
-        logger.warning("RPC %s.%s raised: %s", experiment.name, func_name, error_msg)
+        logger.exception("RPC %s.%s raised: %s", experiment.name, func_name, error_msg)
 
     skip_log = _has_flag(func, "_leap_nolog")
     if not skip_log:

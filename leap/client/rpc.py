@@ -111,7 +111,7 @@ class RPCClient:
             detail = None
             try:
                 detail = resp.json().get("detail")
-            except Exception:
+            except (ValueError, json.JSONDecodeError):
                 detail = resp.text or resp.reason
 
             if status == 403:

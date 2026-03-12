@@ -13,19 +13,64 @@ from typing import Any
 
 import yaml
 
+from leap import __version__
 from leap.config import experiments_dir
 
 logger = logging.getLogger(__name__)
 
 VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
+# Sentinel entry_point meaning "open the experiment README page" (/static/readme.html?exp=...)
+ENTRY_POINT_README = "readme"
+
 DEFAULT_FRONTMATTER = {
     "display_name": "",
     "description": "",
     "version": "",
-    "entry_point": "dashboard.html",
+    "entry_point": ENTRY_POINT_README,
     "require_registration": True,
 }
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    """Parse a version string like '1.0.0' into a tuple of ints."""
+    return tuple(int(x) for x in v.split(".") if x.isdigit())
+
+
+def check_leap_version(required: str) -> tuple[bool, str]:
+    """Check if current LEAP2 version satisfies a requirement like '>=1.0'.
+
+    Returns (ok, message).
+    """
+    req = required.strip()
+    if not req:
+        return True, ""
+
+    if req.startswith(">="):
+        min_ver = _parse_version(req[2:])
+        cur_ver = _parse_version(__version__)
+        if cur_ver >= min_ver:
+            return True, f"LEAP2 {__version__} >= {req[2:]}"
+        return False, f"LEAP2 {__version__} < {req[2:]} (required: {req})"
+    elif req.startswith(">"):
+        min_ver = _parse_version(req[1:])
+        cur_ver = _parse_version(__version__)
+        if cur_ver > min_ver:
+            return True, f"LEAP2 {__version__} > {req[1:]}"
+        return False, f"LEAP2 {__version__} <= {req[1:]} (required: {req})"
+    elif req.startswith("=="):
+        req_ver = _parse_version(req[2:])
+        cur_ver = _parse_version(__version__)
+        if cur_ver == req_ver:
+            return True, f"LEAP2 {__version__} == {req[2:]}"
+        return False, f"LEAP2 {__version__} != {req[2:]} (required: {req})"
+    else:
+        # Treat bare version as >=
+        min_ver = _parse_version(req)
+        cur_ver = _parse_version(__version__)
+        if cur_ver >= min_ver:
+            return True, f"LEAP2 {__version__} >= {req}"
+        return False, f"LEAP2 {__version__} < {req} (required: >={req})"
 
 
 def validate_experiment_name(name: str) -> bool:
@@ -106,6 +151,7 @@ def get_function_info(func: callable) -> dict[str, str]:
         "doc": inspect.getdoc(func) or "",
         "nolog": getattr(func, "_leap_nolog", False),
         "noregcheck": getattr(func, "_leap_noregcheck", False),
+        "ratelimit": getattr(func, "_leap_ratelimit", "default"),
     }
 
 
@@ -124,8 +170,16 @@ class ExperimentInfo:
         self.display_name = self.frontmatter.get("display_name") or name
         self.description = self.frontmatter.get("description", "")
         self.version = self.frontmatter.get("version", "")
-        self.entry_point = self.frontmatter.get("entry_point", "dashboard.html")
+        self.entry_point = self.frontmatter.get("entry_point", ENTRY_POINT_README)
         self.require_registration = self.frontmatter.get("require_registration", True)
+        self.leap_version = self.frontmatter.get("leap_version", "")
+
+        # Check leap_version requirement
+        self.version_ok, self.version_message = check_leap_version(self.leap_version)
+        if self.leap_version and not self.version_ok:
+            logger.warning(
+                "Experiment '%s' requires %s — %s", name, self.leap_version, self.version_message
+            )
 
         self.functions: dict[str, callable] = {}
         self.reload_functions()
@@ -146,6 +200,8 @@ class ExperimentInfo:
             "entry_point": self.entry_point,
             "function_count": len(self.functions),
             "require_registration": self.require_registration,
+            "leap_version": self.leap_version,
+            "leap_version_ok": self.version_ok,
         }
 
 

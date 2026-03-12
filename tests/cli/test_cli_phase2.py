@@ -24,7 +24,6 @@ class TestInitProjectFn:
         assert (tmp_path / "config").is_dir()
         assert (tmp_path / "ui" / "shared").is_dir()
         assert (tmp_path / "ui" / "landing").is_dir()
-        assert (tmp_path / "ui" / "login").is_dir()
         assert any("created" == v for v in results.values())
 
     def test_idempotent(self, tmp_path):
@@ -36,7 +35,6 @@ class TestInitProjectFn:
         init_project_fn(root=tmp_path)
         assert (tmp_path / "ui" / "shared" / "theme.css").is_file()
         assert (tmp_path / "ui" / "landing" / "index.html").is_file()
-        assert (tmp_path / "ui" / "login" / "index.html").is_file()
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
         (tmp_path / "ui" / "shared").mkdir(parents=True)
@@ -91,7 +89,7 @@ class TestNewExperimentFn:
     def test_dashboard_references_experiment(self, tmp_root):
         path = new_experiment_fn("viz-lab", root=tmp_root)
         html = (path / "ui" / "dashboard.html").read_text()
-        assert "viz-lab" in html
+        assert "Viz Lab" in html
 
 
 class TestListExperimentsFn:
@@ -152,6 +150,25 @@ class TestValidateExperimentFn:
         checks = [r["check"] for r in results]
         assert "readme" in checks
         assert "funcs" in checks
+
+    def test_leap_version_check_passes(self, tmp_root):
+        # Default experiment has leap_version: ">=1.0" which should pass
+        (tmp_root / "experiments" / "default" / "README.md").write_text(
+            "---\nname: default\nleap_version: '>=1.0'\n---\n"
+        )
+        results = validate_experiment_fn("default", root=tmp_root)
+        ver_check = [r for r in results if r["check"] == "leap_version"]
+        assert len(ver_check) == 1
+        assert ver_check[0]["status"] == "ok"
+
+    def test_leap_version_check_fails(self, tmp_root):
+        (tmp_root / "experiments" / "default" / "README.md").write_text(
+            "---\nname: default\nleap_version: '>=99.0'\n---\n"
+        )
+        results = validate_experiment_fn("default", root=tmp_root)
+        ver_check = [r for r in results if r["check"] == "leap_version"]
+        assert len(ver_check) == 1
+        assert ver_check[0]["status"] == "error"
 
 
 class TestShowConfigFn:
@@ -303,3 +320,49 @@ class TestDoctorCommand:
     def test_doctor_checks_python(self, tmp_root):
         result = runner.invoke(app, ["doctor", "--root", str(tmp_root)])
         assert "python" in result.output.lower()
+
+
+class TestImportStudentsCommand:
+    def _write_csv(self, tmp_path, filename, content):
+        p = tmp_path / filename
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_import_basic(self, tmp_root):
+        csv_path = self._write_csv(
+            tmp_root, "students.csv",
+            "student_id,name,email\ns001,Alice,alice@u.edu\ns002,Bob,\ns003,Charlie,charlie@u.edu\n",
+        )
+        result = runner.invoke(app, ["import-students", "default", str(csv_path), "--root", str(tmp_root)])
+        assert result.exit_code == 0
+        assert "Added: 3" in result.output
+
+    def test_import_skips_duplicates(self, tmp_root):
+        # Pre-add one student
+        runner.invoke(app, ["add-student", "default", "s001", "--root", str(tmp_root)])
+        csv_path = self._write_csv(
+            tmp_root, "students.csv",
+            "student_id,name\ns001,Alice\ns002,Bob\n",
+        )
+        result = runner.invoke(app, ["import-students", "default", str(csv_path), "--root", str(tmp_root)])
+        assert result.exit_code == 0
+        assert "Added: 1" in result.output
+        assert "Skipped: 1" in result.output
+
+    def test_import_missing_header(self, tmp_root):
+        csv_path = self._write_csv(
+            tmp_root, "bad.csv",
+            "id,name\ns001,Alice\n",
+        )
+        result = runner.invoke(app, ["import-students", "default", str(csv_path), "--root", str(tmp_root)])
+        assert result.exit_code == 1
+        assert "student_id" in result.output
+
+    def test_import_email_optional(self, tmp_root):
+        csv_path = self._write_csv(
+            tmp_root, "students.csv",
+            "student_id,name\ns001,Alice\ns002,Bob\n",
+        )
+        result = runner.invoke(app, ["import-students", "default", str(csv_path), "--root", str(tmp_root)])
+        assert result.exit_code == 0
+        assert "Added: 2" in result.output

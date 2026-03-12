@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+import logging
 
-from leap.core import rpc, storage
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from leap.api.deps import get_db_session, get_experiment_info
+from leap.core import rpc
+from leap.core.experiment import ExperimentInfo
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -19,14 +26,11 @@ class CallRequest(BaseModel):
 
 
 @router.post("/exp/{experiment}/call")
-async def call_function(experiment: str, body: CallRequest, request: Request):
-    experiments = request.app.state.experiments
-    if experiment not in experiments:
-        raise HTTPException(404, detail=f"Experiment '{experiment}' not found")
-
-    exp_info = experiments[experiment]
-    session = storage.get_session(experiment, exp_info.db_path)
-
+async def call_function(
+    body: CallRequest,
+    exp_info: ExperimentInfo = Depends(get_experiment_info),
+    session: Session = Depends(get_db_session),
+):
     try:
         result = rpc.execute_rpc(
             exp_info,
@@ -38,11 +42,12 @@ async def call_function(experiment: str, body: CallRequest, request: Request):
             trial=body.trial,
         )
         return {"result": result}
+    except rpc.RateLimitError as e:
+        raise HTTPException(429, detail=str(e))
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     except PermissionError as e:
         raise HTTPException(403, detail=str(e))
     except RuntimeError as e:
+        logger.exception("RPC call failed: %s.%s", exp_info.name, body.func_name)
         raise HTTPException(500, detail=str(e))
-    finally:
-        session.close()
