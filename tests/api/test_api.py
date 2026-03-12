@@ -139,6 +139,8 @@ class TestAuth:
             json={"student_id": "x", "name": "x"}).status_code == 401
         assert client.post("/exp/default/admin/delete-student",
             json={"student_id": "x"}).status_code == 401
+        assert client.post("/exp/default/admin/delete-log",
+            json={"log_id": 1}).status_code == 401
         assert client.post("/exp/default/admin/reload-functions").status_code == 401
 
     def test_logout(self, admin_client):
@@ -243,6 +245,49 @@ class TestStudentAdmin:
         resp = admin_client.post(
             "/exp/nonexistent/admin/add-student",
             json={"student_id": "s001", "name": "Alice"},
+        )
+        assert resp.status_code == 404
+
+
+class TestImportStudents:
+    def test_import_students(self, admin_client):
+        resp = admin_client.post(
+            "/exp/default/admin/import-students",
+            json={"students": [
+                {"student_id": "s001", "name": "Alice"},
+                {"student_id": "s002", "name": "Bob"},
+                {"student_id": "s003", "name": "Charlie"},
+            ]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert len(data["added"]) == 3
+
+    def test_import_skips_duplicates(self, admin_client):
+        _register_student(admin_client, sid="s001", name="Alice")
+        resp = admin_client.post(
+            "/exp/default/admin/import-students",
+            json={"students": [
+                {"student_id": "s001", "name": "Alice"},
+                {"student_id": "s002", "name": "Bob"},
+            ]},
+        )
+        data = resp.json()
+        assert data["added"] == ["s002"]
+        assert data["skipped"] == ["s001"]
+
+    def test_import_requires_auth(self, client):
+        resp = client.post(
+            "/exp/default/admin/import-students",
+            json={"students": [{"student_id": "s001"}]},
+        )
+        assert resp.status_code == 401
+
+    def test_import_unknown_experiment(self, admin_client):
+        resp = admin_client.post(
+            "/exp/nonexistent/admin/import-students",
+            json={"students": [{"student_id": "s001"}]},
         )
         assert resp.status_code == 404
 
@@ -550,3 +595,104 @@ class TestDecoratorsViaAPI:
         assert "ping" in funcs
         assert "fast_step" in funcs
         assert "logged_reset" in funcs
+
+
+# ── Export Logs ──
+
+
+class TestExportLogs:
+    def test_export_empty(self, admin_client):
+        resp = admin_client.get("/exp/default/admin/export-logs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["count"] == 0
+        assert data["logs"] == []
+
+    def test_export_with_logs(self, admin_client):
+        _register_student(admin_client)
+        _call_func(admin_client, func="square", sid="s001", args=[3])
+        _call_func(admin_client, func="add", sid="s001", args=[1, 2])
+        resp = admin_client.get("/exp/default/admin/export-logs")
+        data = resp.json()
+        assert data["count"] == 2
+        assert len(data["logs"]) == 2
+
+    def test_export_requires_auth(self, client):
+        resp = client.get("/exp/default/admin/export-logs")
+        assert resp.status_code == 401
+
+    def test_export_invalid_format(self, admin_client):
+        resp = admin_client.get("/exp/default/admin/export-logs?format=xml")
+        assert resp.status_code == 400
+
+
+# ── Delete Log (admin only) ──
+
+
+class TestDeleteLog:
+    def test_delete_log_requires_auth(self, client):
+        resp = client.post("/exp/default/admin/delete-log", json={"log_id": 1})
+        assert resp.status_code == 401
+
+    def test_delete_log_success(self, admin_client):
+        _register_student(admin_client)
+        _call_func(admin_client, func="square", sid="s001", args=[5])
+        logs_resp = admin_client.get("/exp/default/logs?n=10")
+        logs = logs_resp.json()["logs"]
+        assert len(logs) == 1
+        log_id = logs[0]["id"]
+        resp = admin_client.post(
+            "/exp/default/admin/delete-log",
+            json={"log_id": log_id},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "log_id": log_id}
+        logs_resp2 = admin_client.get("/exp/default/logs?n=10")
+        assert len(logs_resp2.json()["logs"]) == 0
+
+    def test_delete_log_nonexistent(self, admin_client):
+        resp = admin_client.post(
+            "/exp/default/admin/delete-log",
+            json={"log_id": 99999},
+        )
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+
+# ── Change Password ──
+
+
+class TestChangePassword:
+    def test_change_password_success(self, admin_client):
+        resp = admin_client.post(
+            "/api/admin/change-password",
+            json={"current_password": "testpass", "new_password": "newpass123"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        # Verify new password works for login
+        admin_client.post("/logout")
+        resp = admin_client.post("/login", json={"password": "newpass123"})
+        assert resp.status_code == 200
+
+    def test_change_password_wrong_current(self, admin_client):
+        resp = admin_client.post(
+            "/api/admin/change-password",
+            json={"current_password": "wrong", "new_password": "newpass"},
+        )
+        assert resp.status_code == 401
+
+    def test_change_password_empty_new(self, admin_client):
+        resp = admin_client.post(
+            "/api/admin/change-password",
+            json={"current_password": "testpass", "new_password": "  "},
+        )
+        assert resp.status_code == 400
+
+    def test_change_password_requires_auth(self, client):
+        resp = client.post(
+            "/api/admin/change-password",
+            json={"current_password": "testpass", "new_password": "newpass"},
+        )
+        assert resp.status_code == 401

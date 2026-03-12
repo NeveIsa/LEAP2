@@ -11,15 +11,20 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 from leap import __version__
+from leap.api.deps import limiter
 from leap.config import get_root, ui_dir, SESSION_SECRET_KEY, DEFAULT_EXPERIMENT
 from leap.core.auth import ensure_credentials
-from leap.core.experiment import discover_experiments
+from leap.core.experiment import discover_experiments, ENTRY_POINT_README
 from leap.api import call, logs, admin, experiments
+from leap.core import storage
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +57,15 @@ def create_app(root=None) -> FastAPI:
 
         app.state.ui_root = ui_root
         yield
+        storage.close_all_engines()
 
     app = FastAPI(title="LEAP2", version=__version__, lifespan=lifespan)
 
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
     secret = SESSION_SECRET_KEY or secrets.token_hex(32)
-    app.add_middleware(SessionMiddleware, secret_key=secret)
+    app.add_middleware(SessionMiddleware, secret_key=secret, max_age=86400, same_site="strict")
 
     cors_origins = os.environ.get("CORS_ORIGINS", "")
     if cors_origins:
@@ -79,10 +88,11 @@ def create_app(root=None) -> FastAPI:
         exps = getattr(request.app.state, "experiments", {})
         if DEFAULT_EXPERIMENT and DEFAULT_EXPERIMENT in exps:
             entry = exps[DEFAULT_EXPERIMENT].entry_point
-            return RedirectResponse(
-                url=f"/exp/{DEFAULT_EXPERIMENT}/ui/{entry}",
-                status_code=307,
-            )
+            if entry == ENTRY_POINT_README:
+                url = f"/static/readme.html?exp={DEFAULT_EXPERIMENT}"
+            else:
+                url = f"/exp/{DEFAULT_EXPERIMENT}/ui/{entry}"
+            return RedirectResponse(url=url, status_code=307)
 
         landing_file = getattr(request.app.state, "ui_root", Path()) / "landing" / "index.html"
         if landing_file.is_file():
@@ -91,19 +101,18 @@ def create_app(root=None) -> FastAPI:
 
     @app.get("/login", include_in_schema=False)
     async def login_page(request: Request):
-        login_file = getattr(request.app.state, "ui_root", Path()) / "login" / "index.html"
-        if login_file.is_file():
-            return FileResponse(str(login_file), media_type="text/html")
-        return {"message": "No login page found at ui/login/index.html."}
+        # Login is handled via modal — redirect to landing page
+        return RedirectResponse(url="/", status_code=307)
 
     @app.exception_handler(404)
     async def not_found_handler(request: Request, exc: StarletteHTTPException):
         if request.url.path.startswith("/api/") or (request.url.path.startswith("/exp/") and "/ui/" not in request.url.path):
-            return HTMLResponse(
-                content='{"detail":"Not found"}',
-                status_code=404,
-                media_type="application/json",
-            )
+            detail = getattr(exc, "detail", None)
+            if isinstance(detail, str) and detail.strip():
+                msg = detail
+            else:
+                msg = "Not found"
+            return JSONResponse(status_code=404, content={"detail": msg})
         page_404 = getattr(request.app.state, "ui_root", Path()) / "404.html"
         if page_404.is_file():
             return FileResponse(str(page_404), status_code=404, media_type="text/html")

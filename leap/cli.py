@@ -8,7 +8,6 @@ import json
 import logging
 import re
 import subprocess
-import shutil
 import sys
 from pathlib import Path
 from typing import Optional
@@ -72,6 +71,37 @@ def add_student_fn(
         session.close()
 
 
+def import_students_fn(
+    experiment: str,
+    csv_file: Path,
+    root: Path | None = None,
+) -> dict:
+    """Import students from a CSV file. Returns result dict with added/skipped/errors."""
+    from leap.core.experiment import ExperimentInfo
+    from leap.core import storage
+
+    resolved = _resolve_root(root)
+    exp_path = resolved / "experiments" / experiment
+    if not exp_path.is_dir():
+        raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
+
+    if not csv_file.is_file():
+        raise typer.BadParameter(f"CSV file not found: {csv_file}")
+
+    with open(csv_file, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "student_id" not in reader.fieldnames:
+            raise typer.BadParameter("CSV must have a 'student_id' column header")
+        rows = list(reader)
+
+    exp_info = ExperimentInfo(experiment, exp_path)
+    session = storage.get_session(experiment, exp_info.db_path)
+    try:
+        return storage.bulk_add_students(session, rows)
+    finally:
+        session.close()
+
+
 def list_students_fn(experiment: str, root: Path | None = None) -> list[dict]:
     """List students in an experiment."""
     from leap.core.experiment import ExperimentInfo
@@ -100,7 +130,6 @@ def init_project_fn(root: Path | None = None) -> dict[str, str]:
         resolved / "config",
         resolved / "ui" / "shared",
         resolved / "ui" / "landing",
-        resolved / "ui" / "login",
     ]
     for d in dirs:
         rel = str(d.relative_to(resolved))
@@ -113,7 +142,6 @@ def init_project_fn(root: Path | None = None) -> dict[str, str]:
     templates = {
         resolved / "ui" / "shared" / "theme.css": _template_theme_css,
         resolved / "ui" / "landing" / "index.html": _template_landing_html,
-        resolved / "ui" / "login" / "index.html": _template_login_html,
     }
     for path, template_fn in templates.items():
         rel = str(path.relative_to(resolved))
@@ -149,7 +177,7 @@ def new_experiment_fn(name: str, root: Path | None = None) -> Path:
     readme = exp_path / "README.md"
     readme.write_text(
         f"---\nname: {name}\ndisplay_name: {name.replace('-', ' ').replace('_', ' ').title()}\n"
-        f"description: \"\"\nentry_point: dashboard.html\nrequire_registration: true\n---\n\n"
+        f"description: \"\"\nentry_point: readme\nrequire_registration: true\n---\n\n"
         f"# {name.replace('-', ' ').replace('_', ' ').title()}\n\nExperiment instructions go here.\n",
         encoding="utf-8",
     )
@@ -164,21 +192,25 @@ def new_experiment_fn(name: str, root: Path | None = None) -> Path:
     )
 
     stub_ui = exp_path / "ui" / "dashboard.html"
+    display = name.replace('-', ' ').replace('_', ' ').title()
     stub_ui.write_text(
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
         "  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-        f"  <title>{name} — LEAP2</title>\n"
+        f"  <title>{display} — LEAP2</title>\n"
+        "  <script>(function(){var t=localStorage.getItem(\"leap-theme\");"
+        "if(t===\"dark\"||(!t&&matchMedia(\"(prefers-color-scheme:dark)\").matches))"
+        "document.documentElement.classList.add(\"dark\")})()</script>\n"
         "  <link rel=\"stylesheet\" href=\"/static/theme.css\">\n"
-        "</head>\n<body>\n  <nav class=\"navbar\">\n"
-        "    <a class=\"navbar-brand\" href=\"/\"><span>LEAP</span>2</a>\n"
-        "    <div class=\"navbar-links\">\n"
-        f"      <a href=\"/static/students.html?exp={name}\">Students</a>\n"
-        f"      <a href=\"/static/logs.html?exp={name}\">Logs</a>\n"
-        "      <a href=\"/\">All Experiments</a>\n"
-        "    </div>\n  </nav>\n  <main class=\"container\">\n"
-        f"    <h1>{name.replace('-', ' ').replace('_', ' ').title()}</h1>\n"
+        "  <script src=\"/static/theme-toggle.js\" defer></script>\n"
+        "</head>\n<body data-page=\"dashboard\">\n"
+        "  <a class=\"skip-to-content\" href=\"#main\">Skip to content</a>\n"
+        "  <script src=\"/static/navbar.js\"></script>\n"
+        "  <main class=\"container\" id=\"main\">\n"
+        f"    <h1>{display}</h1>\n"
         "    <p>Edit this page or add visualizations.</p>\n"
-        "  </main>\n</body>\n</html>\n",
+        "  </main>\n"
+        "  <script src=\"/static/footer.js\"></script>\n"
+        "</body>\n</html>\n",
         encoding="utf-8",
     )
 
@@ -209,6 +241,8 @@ def validate_experiment_fn(name: str, root: Path | None = None) -> list[dict]:
         validate_experiment_name,
         parse_frontmatter,
         load_functions,
+        check_leap_version,
+        ENTRY_POINT_README,
     )
 
     resolved = _resolve_root(root)
@@ -242,14 +276,26 @@ def validate_experiment_fn(name: str, root: Path | None = None) -> list[dict]:
         else:
             results.append({"check": "funcs", "status": "warning", "message": "No functions found"})
 
-    ui_dir = exp_path / "ui"
+    # leap_version check
     fm = parse_frontmatter(readme_path) if readme_path.is_file() else {}
-    entry = fm.get("entry_point", "dashboard.html")
-    entry_path = ui_dir / entry
-    if not entry_path.is_file():
-        results.append({"check": "entry_point", "status": "warning", "message": f"{entry} not found in ui/"})
+    leap_ver = fm.get("leap_version", "")
+    if leap_ver:
+        ok, msg = check_leap_version(leap_ver)
+        if ok:
+            results.append({"check": "leap_version", "status": "ok", "message": msg})
+        else:
+            results.append({"check": "leap_version", "status": "error", "message": msg})
+
+    ui_dir = exp_path / "ui"
+    entry = fm.get("entry_point", ENTRY_POINT_README)
+    if entry == ENTRY_POINT_README:
+        results.append({"check": "entry_point", "status": "ok", "message": "README page (default)"})
     else:
-        results.append({"check": "entry_point", "status": "ok", "message": f"{entry} exists"})
+        entry_path = ui_dir / entry
+        if not entry_path.is_file():
+            results.append({"check": "entry_point", "status": "warning", "message": f"{entry} not found in ui/"})
+        else:
+            results.append({"check": "entry_point", "status": "ok", "message": f"{entry} exists"})
 
     return results
 
@@ -431,6 +477,10 @@ def install_experiment_fn(
     if dest.exists():
         raise typer.BadParameter(f"Experiment '{name}' already exists at {dest}")
 
+    parsed_url = urlparse(url)
+    if parsed_url.scheme not in ("https", "http", "git", "ssh", ""):
+        raise typer.BadParameter(f"Unsupported URL scheme: '{parsed_url.scheme}'")
+
     try:
         subprocess.run(
             ["git", "clone", url, str(dest)],
@@ -442,6 +492,19 @@ def install_experiment_fn(
         raise typer.BadParameter("git is not installed or not on PATH")
     except subprocess.CalledProcessError as e:
         raise typer.BadParameter(f"git clone failed: {e.stderr.strip()}")
+
+    req_file = dest / "requirements.txt"
+    if req_file.is_file():
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            logger.info("Installed dependencies from %s", req_file)
+        except subprocess.CalledProcessError as e:
+            logger.warning("pip install failed for %s: %s", name, e.stderr.strip())
 
     return name, dest
 
@@ -461,12 +524,6 @@ def _template_landing_html() -> str:
         return src.read_text(encoding="utf-8")
     return "<!DOCTYPE html><html><body><h1>LEAP2</h1><p>Landing page placeholder.</p></body></html>\n"
 
-
-def _template_login_html() -> str:
-    src = Path(__file__).resolve().parent.parent / "ui" / "login" / "index.html"
-    if src.is_file():
-        return src.read_text(encoding="utf-8")
-    return "<!DOCTYPE html><html><body><h1>Login</h1><p>Login page placeholder.</p></body></html>\n"
 
 
 # ── CLI commands ──
@@ -512,6 +569,27 @@ def add_student(
     """Add a student to an experiment."""
     result = add_student_fn(experiment, student_id, name, root)
     typer.echo(f"Added student '{result['student_id']}' to '{experiment}'")
+
+
+@app.command("import-students")
+def import_students(
+    experiment: str = typer.Argument(..., help="Experiment name"),
+    csv_file: Path = typer.Argument(..., help="Path to CSV file"),
+    root: Optional[Path] = typer.Option(None, help="Project root override"),
+):
+    """Bulk-import students from a CSV file."""
+    try:
+        result = import_students_fn(experiment, csv_file, root)
+    except typer.BadParameter as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(
+        f"Added: {len(result['added'])} | "
+        f"Skipped: {len(result['skipped'])} (duplicates) | "
+        f"Errors: {len(result['errors'])}"
+    )
+    for err in result["errors"]:
+        typer.echo(f"  Error: student_id={err['student_id']!r} — {err['error']}")
 
 
 @app.command()

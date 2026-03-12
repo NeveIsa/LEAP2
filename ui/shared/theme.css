@@ -534,6 +534,21 @@ html.dark .card-links a.card-link-open:hover {
   width: 100%;
 }
 
+.btn-sm {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  min-height: 1.5rem;
+}
+
+.btn-danger {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+.btn-danger:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
 /* ── Alerts ── */
 
 .alert {
@@ -1007,23 +1022,6 @@ html.dark .theme-toggle .icon-sun { display: block; }
   padding: 0.35rem 0.75rem;
   min-height: 2rem;
   font-size: 0.75rem;
-}
-
-/* ── Delete button ── */
-
-.delete-btn {
-  background: none;
-  border: none;
-  color: var(--color-error);
-  cursor: pointer;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--radius);
-  transition: background 0.15s;
-}
-.delete-btn:hover {
-  background: var(--color-error-bg);
 }
 
 /* ════════════════════════════════════════

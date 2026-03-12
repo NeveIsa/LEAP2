@@ -14,11 +14,13 @@ LEAP2 is a clean-room reimplementation of LEAP, fixing tight coupling problems (
 - **Per-Experiment Isolation** — Each experiment has its own functions, UI, and DuckDB database
 - **URL-Scoped** — All APIs live under `/exp/<name>/`; no hidden server state, fully bookmarkable
 - **Automatic Logging** — Every RPC call is logged with args, result, timestamp, student ID, and trial
-- **Student Registration** — Per-experiment registration with admin management
-- **Flexible Decorators** — `@nolog` for high-frequency calls, `@noregcheck` for open functions
+- **Student Registration** — Per-experiment registration with admin management; bulk CSV import via CLI, API, and UI
+- **Per-Function Rate Limiting** — Default 120 calls/minute per student; override with `@ratelimit("10/minute")` or disable with `@ratelimit(False)`
+- **Flexible Decorators** — `@nolog` for high-frequency calls, `@noregcheck` for open functions, `@ratelimit` for rate control
 - **Decoupled Visualizations** — JS + Python Log Clients abstract log queries; visualizations depend on the client interface, not raw API calls
 - **Rich Client** — Python RPCClient with `is_registered()`, `help()`, `fetch_logs()`, structured exception hierarchy (`RPCError`, `RPCNotRegisteredError`, etc.)
-- **Admin Client** — Browser-side student management and function reloading via `adminclient.js`
+- **Admin Client** — Browser-side student management, log deletion, and function reloading via `adminclient.js`
+- **Admin Log Management** — Delete individual log entries from the Logs page (admin only; with confirmation prompt)
 - **Polished UI** — Glassmorphism navbar, dark/light themes, sparklines, inline counts, experiment version badges, grouped nav (experiment vs shared links), academic fonts for README/docs, syntax highlighting, floating TOC
 - **CLI + Web** — Same logic powers both the `leap` CLI and the FastAPI web API
 - **Filtered Log Queries** — Filter by student, function, trial, time range; cursor pagination
@@ -55,7 +57,7 @@ LEAP2/
 │   ├── cli.py               # Typer CLI (shared functions used by API too)
 │   ├── core/                # Pure logic, no HTTP
 │   │   ├── storage.py       # SQLAlchemy models, DuckDB CRUD
-│   │   ├── rpc.py           # RPC execution, @nolog, @noregcheck
+│   │   ├── rpc.py           # RPC execution, @nolog, @noregcheck, @ratelimit
 │   │   ├── auth.py          # PBKDF2 hashing, credentials I/O
 │   │   └── experiment.py    # Discovery, README parsing, function loading
 │   ├── api/                 # FastAPI routers (thin wrappers over core)
@@ -70,16 +72,15 @@ LEAP2/
 ├── ui/
 │   ├── shared/              # theme.css, logclient.js, adminclient.js, functions.html, students.html, logs.html, readme.html
 │   ├── landing/             # Landing page (index.html) — experiment cards with sparklines, counts, version badges
-│   ├── login/               # Login page (index.html)
 │   └── 404.html             # Styled 404 page
 ├── experiments/
 │   └── default/             # Bundled demo experiment
 │       ├── README.md        # YAML frontmatter + instructions
 │       ├── funcs/           # Python functions (auto-discovered)
-│       ├── ui/              # dashboard.html, call-log.html
+│       ├── ui/              # optional; entry_point can be "readme" or a file in ui/
 │       └── db/              # DuckDB file (gitignored)
 ├── config/                  # admin_credentials.json (gitignored)
-├── tests/                   # pytest suite (412 tests)
+├── tests/                   # pytest suite (462 tests)
 └── pyproject.toml
 ```
 
@@ -112,7 +113,7 @@ The Log Client provides a stable interface (`getLogs`, `getLogOptions`, `getAllL
 - **API** (`leap/api/`) — Thin FastAPI routers that call core functions
 - **Middleware** — `require_admin` dependency checks session for `/exp/<name>/admin/*`
 - **CLI** — Shared `_fn()` functions importable by both CLI and API; no logic duplication
-- **UI** — `shared/` (cross-experiment), `landing/`, `login/`, per-experiment `ui/`
+- **UI** — `shared/` (cross-experiment), `landing/`, per-experiment `ui/`; login is handled via modal overlay
 
 ## Creating Experiments
 
@@ -164,10 +165,12 @@ leap install https://github.com/user/cool-lab.git
 leap install https://github.com/user/cool-lab.git --name custom-name
 ```
 
+If the cloned experiment contains a `requirements.txt`, `leap install` will automatically run `pip install -r requirements.txt` to install its dependencies into the current environment.
+
 ## Decorators
 
 ```python
-from leap import nolog, noregcheck
+from leap import nolog, noregcheck, ratelimit
 
 @nolog
 def step(dx):
@@ -178,11 +181,23 @@ def step(dx):
 def echo(x):
     """Anyone can call this, no registration required. Still logged."""
     return x
+
+@ratelimit("10/minute")
+def expensive_simulation(x):
+    """Costly computation — limited to 10 calls/min per student."""
+    return run_sim(x)
+
+@ratelimit(False)
+def ping():
+    """Unrestricted — no rate limit."""
+    return "pong"
 ```
 
 `@nolog` — Skip logging for high-frequency calls (real-time UI updates, animation, polling). The function still executes and returns results; it just doesn't create a log entry.
 
 `@noregcheck` — Skip registration check for that function regardless of experiment setting. Useful when only some functions should be open (e.g. `echo()` for quick tests, `train()` requires registration).
+
+`@ratelimit` — Control per-student rate limiting. All functions have a default rate limit of 120/minute per student. `@ratelimit("N/period")` overrides (period: `second`, `minute`, `hour`, `day`). `@ratelimit(False)` disables rate limiting entirely. Keyed by `(experiment, function, student_id)` — different students are independently limited.
 
 Functions are reloaded at runtime via `POST /exp/<name>/admin/reload-functions` or the admin UI.
 
@@ -308,10 +323,9 @@ Requires an active admin session (cookie set by the login page). `fromCurrentPag
 ## Shared UI Pages
 
 - **Functions** — `/static/functions.html?exp=<name>` — Function cards with syntax-highlighted signatures, docstrings (serif font), and decorator badges
-- **Students** — `/static/students.html?exp=<name>` — Add, list, delete students with optional email field (admin required; shows auth gate when not logged in)
-- **Logs** — `/static/logs.html?exp=<name>` — Filter and browse call logs with sparkline visualization (admin required; shows auth gate when not logged in)
+- **Students** — `/static/students.html?exp=<name>` — Add, list, delete students with optional email field; bulk CSV import with preview (admin required; shows auth gate when not logged in)
+- **Logs** — `/static/logs.html?exp=<name>` — Real-time log viewer with auto-refresh, sparkline visualization, student/function/trial filters; admin users see per-row delete buttons
 - **README** — `/static/readme.html?exp=<name>` — Rendered experiment README with academic fonts, syntax highlighting (highlight.js), line numbers, floating table of contents, and frontmatter banner
-- **Call Log** — `/exp/<name>/ui/call-log.html` — Real-time log viewer with auto-refresh (experiment-specific)
 
 Shared pages receive the experiment name via the `?exp=` query parameter. Links from experiment UIs and the landing page include this parameter automatically.
 
@@ -320,11 +334,13 @@ Shared pages receive the experiment name via the `?exp=` query parameter. Links 
 Experiment pages use a grouped navbar with a visual divider separating experiment-provided links from shared/static links:
 
 ```
-[ Lab ]  Call Log  |  Students (12)  Logs (347)  Functions (5)  README  All Experiments
- ↑ experiment       ↑ divider   ↑ shared (smaller, muted)
+[ Lab ]  |  Students (12)  Logs (347)  Functions (5)  README  All Experiments
+ ↑ experiment  ↑ divider   ↑ shared (smaller, muted)
 ```
 
-- **Left** — Experiment-specific links (Lab, Call Log) at normal prominence
+The navbar is rendered by `navbar.js` — a single shared script included by all pages. It reads `data-page` from `<body>` to highlight the current link, resolves the experiment name from the URL, and enriches link text with live counts from the API.
+
+- **Left** — Experiment-specific links (Lab) at normal prominence
 - **Divider** — Subtle vertical line (horizontal on mobile)
 - **Right** — Shared links (`nav-shared` class) with inline counts fetched from `/api/experiments` and `/exp/<name>/log-options`
 
@@ -369,9 +385,12 @@ The DB stores raw JSON strings (`args_json`, `result_json` TEXT columns); the AP
 | `/exp/<name>/is-registered` | GET | — | Check student registration |
 | `/exp/<name>/readme` | GET | — | Experiment README (frontmatter + body) |
 | `/exp/<name>/admin/add-student` | POST | Admin | Add student |
+| `/exp/<name>/admin/import-students` | POST | Admin | Bulk-import students (JSON array) |
 | `/exp/<name>/admin/students` | GET | Admin | List students |
 | `/exp/<name>/admin/delete-student` | POST | Admin | Delete student + their logs |
+| `/exp/<name>/admin/delete-log` | POST | Admin | Delete a single log entry |
 | `/exp/<name>/admin/reload-functions` | POST | Admin | Reload functions from disk |
+| `/exp/<name>/admin/export-logs` | GET | Admin | Export all logs (JSON; `?format=jsonlines\|csv`) |
 
 **Root-level:**
 
@@ -381,7 +400,8 @@ The DB stores raw JSON strings (`args_json`, `result_json` TEXT columns); the AP
 | `/api/experiments` | GET | List experiments with metadata (name, version, student_count, function_count) |
 | `/api/health` | GET | Health check (`{ok, version}`) |
 | `/api/auth-status` | GET | Check admin login (`{admin: true/false}`) |
-| `/login` | GET/POST | Login page / authenticate (JSON body) |
+| `/login` | GET/POST | Authenticate (JSON body); GET redirects to landing |
+| `/api/admin/change-password` | POST | Admin | Change admin password (requires current + new) |
 | `/logout` | POST | Clear session |
 
 **RPC payload:**
@@ -402,19 +422,22 @@ Error:    { "detail": "..." }
     "signature": "(x: float)",
     "doc": "Return x squared.",
     "nolog": false,
-    "noregcheck": false
+    "noregcheck": false,
+    "ratelimit": "default"
   },
   "step": {
     "signature": "(student_id: str, dx: float = 0.0, dy: float = 0.0)",
     "doc": "Move the agent by (dx, dy). Called at high frequency by UI — NOT logged.",
     "nolog": true,
-    "noregcheck": false
+    "noregcheck": false,
+    "ratelimit": "default"
   },
   "echo": {
     "signature": "(x)",
     "doc": "Return input unchanged. Open to all — no registration required. Still logged.",
     "nolog": false,
-    "noregcheck": true
+    "noregcheck": true,
+    "ratelimit": "default"
   }
 }
 ```
@@ -467,7 +490,7 @@ The `experiment` column is redundant within a single per-experiment DB but kept 
 - **Global** — One credentials file (`config/admin_credentials.json`); one login unlocks all experiments
 - **Protected**: All `/exp/<name>/admin/*` endpoints
 - **Public**: `/call`, `/functions`, `/logs`, `/log-options`, `/is-registered`, landing, login, health
-- **Logs are public** — Anyone can query `/logs` (intentional for classroom visualizations)
+- **Logs are public** — Anyone can query `/logs` (intentional for classroom visualizations); deleting logs requires admin
 
 Credentials use PBKDF2-SHA256 (240,000 iterations). First run: if no credentials exist, set via `leap set-password` or `ADMIN_PASSWORD` env. Sessions use `SESSION_SECRET_KEY` env (random per restart if not set).
 
@@ -486,12 +509,13 @@ Credentials use PBKDF2-SHA256 (240,000 iterations). First run: if no credentials
 | `leap run` | Start the server |
 | `leap init` | Bootstrap project structure |
 | `leap new <name>` | Create experiment scaffold |
-| `leap install <url>` | Clone experiment from Git |
+| `leap install <url>` | Clone experiment from Git; auto-installs `requirements.txt` if present |
 | `leap list` | List experiments |
 | `leap validate <name>` | Validate experiment setup |
 | `leap export <exp> [--format]` | Export logs to `<exp>.jsonl` or `<exp>.csv` |
 | `leap set-password` | Set admin password |
 | `leap add-student <exp> <id>` | Add a student |
+| `leap import-students <exp> <csv>` | Bulk-import students from CSV |
 | `leap list-students <exp>` | List students |
 | `leap config` | Show resolved configuration |
 | `leap doctor` | Validate full setup (Python, packages, dirs, credentials) |
@@ -514,7 +538,7 @@ Credentials use PBKDF2-SHA256 (240,000 iterations). First run: if no credentials
 # Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (412 tests)
+# Run tests (462 tests)
 pytest tests/
 
 # Run with auto-reload
@@ -526,9 +550,9 @@ uvicorn leap.main:app --reload --port 9000
 ```
 tests/
 ├── conftest.py               # Shared fixtures (tmp_root, tmp_credentials)
-├── core/                     # storage, auth, experiment, rpc (159 tests)
+├── core/                     # storage, auth, experiment, rpc (161 tests)
 ├── api/
-│   ├── test_api.py           # Full API integration (60 tests)
+│   ├── test_api.py           # Full API integration (64 tests)
 │   ├── test_ui_serving.py    # Static mounts, landing, login (21 tests)
 │   └── test_phase4.py        # Shared pages, CORS, function flags (15 tests)
 ├── client/
@@ -536,7 +560,7 @@ tests/
 │   └── test_logclient.py     # Python LogClient (23 tests)
 └── cli/
     ├── test_cli_phase2.py    # init, new, list, validate, config, doctor (47 tests)
-    ├── test_cli_phase3.py    # install (16 tests)
+    ├── test_cli_phase3.py    # install, pip deps (19 tests)
     └── test_cli_phase4.py    # export (14 tests)
 ```
 
@@ -552,7 +576,7 @@ name: default
 display_name: Default Lab
 description: Basic RPC lab with square, cubic, Rosenbrock.
 version: "1.0.0"
-entry_point: dashboard.html
+entry_point: readme
 leap_version: ">=1.0"
 require_registration: true
 ---
@@ -569,8 +593,8 @@ require_registration: true
 | `display_name` | folder name | Human-readable name |
 | `description` | `""` | Short description |
 | `version` | `""` | Experiment version (shown on landing page card) |
-| `entry_point` | `dashboard.html` | UI file to open |
-| `leap_version` | _(none)_ | Minimum LEAP2 version required (informational) |
+| `entry_point` | `readme` | `readme` = experiment README page; or a UI file in `ui/` (e.g. `dashboard.html`) |
+| `leap_version` | _(none)_ | Minimum LEAP2 version required (enforced; `>=1.0`, `==1.0.0`, or bare `1.0`) |
 | `require_registration` | `true` | Require student registration for RPC |
 
 Experiment names must match `[a-z0-9][a-z0-9_-]*` (lowercase, digits, hyphens, underscores). Invalid folder names are skipped at discovery with a warning.
@@ -599,12 +623,10 @@ Currently the README covers all of this in condensed form.
 - **Quiz system** — Deferred from LEAP
 - **Monaco/uPlot IDE dashboard** — Rich in-browser coding + plotting
 - **DB migrations** — Schema versioning for future LEAP2 changes
-- **Experiment dependencies** — Per-experiment pip deps (e.g. numpy); currently relies on base requirements
-- **Per-student auth** — Granular access beyond global admin
+- ~~**Experiment dependencies**~~ — Implemented: `leap install` auto-runs `pip install -r requirements.txt` if present in the cloned experiment
 - **WebSocket real-time** — Push log updates to browser instead of polling
-- **Bulk student import** — CSV import (LEAP had this; single add sufficient for now)
-- **Admin Client extensions** — `changePassword`, `exportLogs` when APIs exist
-- **`leap_version` enforcement** — Currently parsed from frontmatter but not checked against server version
+- ~~**Admin Client extensions**~~ — Implemented: `changePassword` (`POST /api/admin/change-password`), `exportLogs` (`GET /admin/export-logs`)
+- ~~**`leap_version` enforcement**~~ — Implemented: parsed from frontmatter and checked at discovery; `leap validate` reports version mismatches
 
 ## License
 

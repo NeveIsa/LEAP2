@@ -134,6 +134,65 @@ class TestInstallExperimentFn:
         assert name == "trail-lab"
 
 
+    def test_pip_install_when_requirements_exist(self, tmp_root):
+        with patch("leap.cli.subprocess.run") as mock_run:
+            def side_effect(cmd, **kwargs):
+                if cmd[0] == "git":
+                    dest = Path(cmd[3])
+                    dest.mkdir(parents=True, exist_ok=True)
+                    (dest / "requirements.txt").write_text("numpy>=1.20\nscipy\n")
+                return MagicMock(returncode=0)
+
+            mock_run.side_effect = side_effect
+            install_experiment_fn(
+                "https://github.com/user/dep-lab.git",
+                root=tmp_root,
+            )
+        assert mock_run.call_count == 2
+        pip_call = mock_run.call_args_list[1]
+        pip_cmd = pip_call[0][0]
+        assert pip_cmd[1:4] == ["-m", "pip", "install"]
+        assert pip_cmd[4] == "-r"
+        assert "requirements.txt" in pip_cmd[5]
+
+    def test_no_pip_install_without_requirements(self, tmp_root):
+        with patch("leap.cli.subprocess.run") as mock_run:
+            def side_effect(cmd, **kwargs):
+                if cmd[0] == "git":
+                    dest = Path(cmd[3])
+                    dest.mkdir(parents=True, exist_ok=True)
+                return MagicMock(returncode=0)
+
+            mock_run.side_effect = side_effect
+            install_experiment_fn(
+                "https://github.com/user/no-deps.git",
+                root=tmp_root,
+            )
+        mock_run.assert_called_once()
+
+    def test_pip_install_failure_does_not_abort(self, tmp_root):
+        call_count = 0
+
+        def side_effect(cmd, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if cmd[0] == "git":
+                dest = Path(cmd[3])
+                dest.mkdir(parents=True, exist_ok=True)
+                (dest / "requirements.txt").write_text("nonexistent-pkg-xyz\n")
+                return MagicMock(returncode=0)
+            raise subprocess.CalledProcessError(1, "pip", stderr="No matching distribution")
+
+        with patch("leap.cli.subprocess.run", side_effect=side_effect):
+            name, path = install_experiment_fn(
+                "https://github.com/user/bad-deps.git",
+                root=tmp_root,
+            )
+        assert name == "bad-deps"
+        assert path.is_dir()
+        assert call_count == 2
+
+
 class TestInstallCommand:
     def test_install_success(self, tmp_root):
         with patch("leap.cli.subprocess.run") as mock_run:

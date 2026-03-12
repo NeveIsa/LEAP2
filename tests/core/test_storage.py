@@ -101,6 +101,60 @@ class TestStudentCRUD:
         assert storage.list_students(db_session) == []
 
 
+class TestBulkAddStudents:
+    def test_bulk_add_basic(self, db_session):
+        result = storage.bulk_add_students(db_session, [
+            {"student_id": "s001", "name": "Alice"},
+            {"student_id": "s002", "name": "Bob"},
+            {"student_id": "s003", "name": "Charlie"},
+        ])
+        assert result["added"] == ["s001", "s002", "s003"]
+        assert result["skipped"] == []
+        assert result["errors"] == []
+        assert len(storage.list_students(db_session)) == 3
+
+    def test_bulk_add_skips_duplicates(self, db_session):
+        storage.add_student(db_session, "s001", "Alice")
+        result = storage.bulk_add_students(db_session, [
+            {"student_id": "s001", "name": "Alice Again"},
+            {"student_id": "s002", "name": "Bob"},
+        ])
+        assert result["added"] == ["s002"]
+        assert result["skipped"] == ["s001"]
+
+    def test_bulk_add_errors_on_missing_id(self, db_session):
+        result = storage.bulk_add_students(db_session, [
+            {"student_id": "", "name": "NoID"},
+            {"name": "AlsoNoID"},
+        ])
+        assert result["added"] == []
+        assert len(result["errors"]) == 2
+        assert result["errors"][0]["error"] == "missing student_id"
+
+    def test_bulk_add_mixed(self, db_session):
+        storage.add_student(db_session, "s001", "Alice")
+        result = storage.bulk_add_students(db_session, [
+            {"student_id": "s001"},
+            {"student_id": "s002", "name": "Bob"},
+            {"student_id": ""},
+        ])
+        assert result["added"] == ["s002"]
+        assert result["skipped"] == ["s001"]
+        assert len(result["errors"]) == 1
+
+    def test_bulk_add_empty_list(self, db_session):
+        result = storage.bulk_add_students(db_session, [])
+        assert result == {"added": [], "skipped": [], "errors": []}
+
+    def test_bulk_add_with_email(self, db_session):
+        result = storage.bulk_add_students(db_session, [
+            {"student_id": "s001", "name": "Alice", "email": "alice@u.edu"},
+        ])
+        assert result["added"] == ["s001"]
+        students = storage.list_students(db_session)
+        assert students[0]["email"] == "alice@u.edu"
+
+
 # ── Log CRUD ──
 
 
@@ -190,6 +244,20 @@ class TestLogCRUD:
         )
         logs = storage.query_logs(db_session)
         assert logs[0]["result"] is False
+
+    def test_delete_log(self, db_session):
+        storage.add_log(
+            db_session,
+            student_id="s001", experiment="t", func_name="f", args=[],
+        )
+        logs = storage.query_logs(db_session)
+        assert len(logs) == 1
+        log_id = logs[0]["id"]
+        assert storage.delete_log(db_session, log_id) is True
+        assert storage.query_logs(db_session) == []
+
+    def test_delete_log_nonexistent(self, db_session):
+        assert storage.delete_log(db_session, 99999) is False
 
     def test_log_string_result(self, db_session):
         storage.add_log(

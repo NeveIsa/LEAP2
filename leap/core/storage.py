@@ -121,6 +121,24 @@ def add_student(session: Session, student_id: str, name: str, email: str | None 
     return student
 
 
+def bulk_add_students(session: Session, students: list[dict]) -> dict:
+    added, skipped, errors = [], [], []
+    for row in students:
+        sid = (row.get("student_id") or "").strip()
+        name = (row.get("name") or "").strip() or sid
+        email = (row.get("email") or "").strip() or None
+        if not sid:
+            errors.append({"student_id": sid, "error": "missing student_id"})
+            continue
+        if session.get(Student, sid):
+            skipped.append(sid)
+            continue
+        session.add(Student(student_id=sid, name=name, email=email))
+        added.append(sid)
+    session.commit()
+    return {"added": added, "skipped": skipped, "errors": errors}
+
+
 def list_students(session: Session) -> list[dict]:
     stmt = select(Student).order_by(Student.student_id)
     return [
@@ -170,8 +188,8 @@ def add_log(
         student_id=student_id,
         experiment=experiment,
         func_name=func_name,
-        args_json=json.dumps(args),
-        result_json=json.dumps(result) if result is not None else None,
+        args_json=json.dumps(args, default=str),
+        result_json=json.dumps(result, default=str) if result is not None else None,
         error=error,
         trial=trial,
     )
@@ -186,6 +204,7 @@ def _parse_json_safe(raw: str | None):
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
+        logger.warning("Failed to parse stored JSON: %.100s", raw)
         return raw
 
 
@@ -240,6 +259,16 @@ def query_logs(
 
     stmt = stmt.limit(n)
     return [log_to_dict(log) for log in session.scalars(stmt)]
+
+
+def delete_log(session: Session, log_id: int) -> bool:
+    """Delete a single log by id. Returns True if deleted, False if not found."""
+    log = session.get(Log, log_id)
+    if not log:
+        return False
+    session.delete(log)
+    session.commit()
+    return True
 
 
 def get_log_options(session: Session) -> dict:

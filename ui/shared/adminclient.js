@@ -82,6 +82,15 @@ export class AdminClient {
   }
 
   /**
+   * Bulk-import students.
+   * @param {Array<{student_id: string, name?: string, email?: string}>} students
+   * @returns {Promise<object>} - { ok, added, skipped, errors }
+   */
+  async importStudents(students) {
+    return this._post(this._apiBase + "/admin/import-students", { students });
+  }
+
+  /**
    * Delete a student (cascades to their logs).
    * @param {string} studentId
    * @returns {Promise<object>}
@@ -96,6 +105,28 @@ export class AdminClient {
    */
   async reloadFunctions() {
     return this._post(this._apiBase + "/admin/reload-functions");
+  }
+
+  /**
+   * Export all logs for the experiment.
+   * @param {string} [format="jsonlines"] - "jsonlines" or "csv"
+   * @returns {Promise<object>} - { ok, format, count, logs }
+   */
+  async exportLogs(format = "jsonlines") {
+    return this._fetch(this._apiBase + "/admin/export-logs?format=" + encodeURIComponent(format));
+  }
+
+  /**
+   * Change the admin password.
+   * @param {string} currentPassword
+   * @param {string} newPassword
+   * @returns {Promise<object>} - { ok: true }
+   */
+  async changePassword(currentPassword, newPassword) {
+    return this._post(this.baseUrl + "/api/admin/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
   }
 
   /** @private */
