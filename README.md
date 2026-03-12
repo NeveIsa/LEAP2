@@ -511,11 +511,30 @@ Credentials use PBKDF2-SHA256 (240,000 iterations). First run: if no credentials
 | `leap export <exp> [--format]` | Export logs to `<exp>.jsonl` or `<exp>.csv` |
 | `leap set-password` | Set admin password |
 | `leap add-student <exp> <id>` | Add a student |
-| `leap import-students <exp> <csv>` | Bulk-import students from CSV |
+| `leap import-students <exp> <csv>` | Bulk-import students from CSV (see format below) |
 | `leap list-students <exp>` | List students |
 | `leap config` | Show resolved configuration |
 | `leap doctor` | Validate full setup (Python, packages, dirs, credentials) |
 | `leap version` | Show version |
+
+### Student CSV Format
+
+The CSV file for `leap import-students` must have a header row with a `student_id` column. The `name` and `email` columns are optional.
+
+```csv
+student_id,name,email
+s001,Alice,alice@example.edu
+s002,Bob,bob@example.edu
+s003,Charlie,
+```
+
+- **`student_id`** (required) — Unique identifier for the student.
+- **`name`** (optional) — Defaults to the `student_id` if not provided or empty.
+- **`email`** (optional) — Can be left blank.
+
+Duplicates (students whose `student_id` already exists) are skipped, not overwritten. The command reports how many were added, skipped, and errored.
+
+The same format is accepted by the API (`POST /exp/<name>/admin/import-students` with a JSON array) and the Students UI page (file upload or paste).
 
 ## Environment Variables
 
