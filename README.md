@@ -61,13 +61,14 @@ LEAP2/
 │   │   ├── call.py          # POST /exp/<name>/call
 │   │   ├── logs.py          # GET /exp/<name>/logs, log-options
 │   │   ├── admin.py         # Admin endpoints (auth required)
-│   │   └── experiments.py   # Metadata, health, login/logout
+│   │   ├── experiments.py   # Metadata, health, login/logout
+│   │   └── deps.py          # Shared dependencies (experiment lookup, DB session, rate limiter)
 │   ├── client/              # Python clients
 │   │   ├── rpc.py           # Client / RPCClient (student-facing, with is_registered, help, fetch_logs)
 │   │   └── logclient.py     # LogClient (log queries)
 │   └── middleware/          # Auth dependency (require_admin)
 ├── ui/
-│   ├── shared/              # theme.css, logclient.js, adminclient.js, functions.html, students.html, logs.html, readme.html
+│   ├── shared/              # theme.css, logclient.js, adminclient.js, navbar.js, footer.js, admin-modal.js, functions.html, students.html, logs.html, readme.html
 │   ├── landing/             # Landing page (index.html) — experiment cards with sparklines, counts, version badges
 │   └── 404.html             # Styled 404 page
 ├── experiments/
@@ -77,7 +78,7 @@ LEAP2/
 │       ├── ui/              # optional; entry_point can be "readme" or a file in ui/
 │       └── db/              # DuckDB file (gitignored)
 ├── config/                  # admin_credentials.json (gitignored)
-├── tests/                   # pytest suite (462 tests)
+├── tests/                   # pytest suite (460 tests)
 └── pyproject.toml
 ```
 
@@ -313,6 +314,9 @@ await admin.addStudent("s001", "Alice");
 const students = await admin.listStudents();
 await admin.deleteStudent("s001");
 await admin.reloadFunctions();
+await admin.importStudents([{ student_id: "s002", name: "Bob" }]);
+await admin.exportLogs("csv");                        // or "jsonlines"
+await admin.changePassword("old-pass", "new-pass");
 ```
 
 Requires an active admin session (cookie set by the login page). `fromCurrentPage()` detects the experiment from the URL path (`/exp/<name>/...`) or query param (`?exp=<name>`).
@@ -320,7 +324,7 @@ Requires an active admin session (cookie set by the login page). `fromCurrentPag
 ## Shared UI Pages
 
 - **Functions** — `/static/functions.html?exp=<name>` — Function cards with syntax-highlighted signatures, docstrings (serif font), and decorator badges
-- **Students** — `/static/students.html?exp=<name>` — Add, list, delete students with optional email field; bulk CSV import with preview (admin required; shows auth gate when not logged in)
+- **Students** — `/static/students.html?exp=<name>` — Add, list, delete students with optional email field; search by ID/name, pagination, bulk CSV import with preview (admin required; shows auth gate when not logged in)
 - **Logs** — `/static/logs.html?exp=<name>` — Real-time log viewer with auto-refresh, sparkline visualization, student/function/trial filters; admin users see per-row delete buttons
 - **README** — `/static/readme.html?exp=<name>` — Rendered experiment README with academic fonts, syntax highlighting (highlight.js), line numbers, floating table of contents, and frontmatter banner
 
@@ -397,7 +401,7 @@ The DB stores raw JSON strings (`args_json`, `result_json` TEXT columns); the AP
 | `/api/experiments` | GET | List experiments with metadata (name, version, student_count, function_count) |
 | `/api/health` | GET | Health check (`{ok, version}`) |
 | `/api/auth-status` | GET | Check admin login (`{admin: true/false}`) |
-| `/login` | GET/POST | Authenticate (JSON body); GET redirects to landing |
+| `/login` | GET/POST | Authenticate (JSON body; rate-limited to 5/min); GET redirects to landing |
 | `/api/admin/change-password` | POST | Admin | Change admin password (requires current + new) |
 | `/logout` | POST | Clear session |
 
@@ -545,6 +549,7 @@ The same format is accepted by the API (`POST /exp/<name>/admin/import-students`
 | `ADMIN_PASSWORD` | _(none)_ | Non-interactive password setup |
 | `SESSION_SECRET_KEY` | _(random)_ | Stable session key for production |
 | `CORS_ORIGINS` | _(none)_ | Comma-separated allowed origins (e.g. `http://localhost:3000,https://myapp.edu`) |
+| `LEAP_RATE_LIMIT` | `1` (enabled) | Set to `0` to disable the global SlowAPI rate limiter (login throttling, etc.) |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 
 ## Development
@@ -553,7 +558,7 @@ The same format is accepted by the API (`POST /exp/<name>/admin/import-students`
 # Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (462 tests)
+# Run tests (460 tests)
 pytest tests/
 
 # Run with auto-reload
@@ -565,16 +570,16 @@ uvicorn leap.main:app --reload --port 9000
 ```
 tests/
 ├── conftest.py               # Shared fixtures (tmp_root, tmp_credentials)
-├── core/                     # storage, auth, experiment, rpc (161 tests)
+├── core/                     # storage, auth, experiment, rpc (194 tests)
 ├── api/
-│   ├── test_api.py           # Full API integration (64 tests)
-│   ├── test_ui_serving.py    # Static mounts, landing, login (21 tests)
+│   ├── test_api.py           # Full API integration (80 tests)
+│   ├── test_ui_serving.py    # Static mounts, landing, login (22 tests)
 │   └── test_phase4.py        # Shared pages, CORS, function flags (15 tests)
 ├── client/
 │   ├── test_rpcclient.py     # RPCClient: call, dispatch, help, is_registered, fetch_logs, exceptions (42 tests)
 │   └── test_logclient.py     # Python LogClient (23 tests)
 └── cli/
-    ├── test_cli_phase2.py    # init, new, list, validate, config, doctor (47 tests)
+    ├── test_cli_phase2.py    # new, list, validate, config, doctor (51 tests)
     ├── test_cli_phase3.py    # install, pip deps (19 tests)
     └── test_cli_phase4.py    # export (14 tests)
 ```
