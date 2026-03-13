@@ -18,7 +18,7 @@ LEAP2 is a clean-room reimplementation of LEAP, fixing tight coupling problems (
 - **Per-Function Rate Limiting** — Default 120 calls/minute per student; override with `@ratelimit("10/minute")` or disable with `@ratelimit(False)`
 - **Flexible Decorators** — `@nolog` for high-frequency calls, `@noregcheck` for open functions, `@ratelimit` for rate control
 - **Decoupled Visualizations** — JS + Python Log Clients abstract log queries; visualizations depend on the client interface, not raw API calls
-- **Rich Client** — Python RPCClient with `is_registered()`, `help()`, `fetch_logs()`, structured exception hierarchy (`RPCError`, `RPCNotRegisteredError`, etc.)
+- **Rich Client** — Python RPCClient with `is_registered()`, `help()`, `fetch_logs()`, structured exception hierarchy (`RPCError`, `RPCNotRegisteredError`, etc.); matching JavaScript RPCClient for browser use
 - **Admin Client** — Browser-side student management, log deletion, and function reloading via `adminclient.js`
 - **Admin Log Management** — Delete individual log entries from the Logs page (admin only; with confirmation prompt)
 - **Polished UI** — Glassmorphism navbar, dark/light themes, sparklines, inline counts, experiment version badges, grouped nav (experiment vs shared links), academic fonts for README/docs, syntax highlighting, floating TOC
@@ -68,7 +68,7 @@ LEAP2/
 │   │   └── logclient.py     # LogClient (log queries)
 │   └── middleware/          # Auth dependency (require_admin)
 ├── ui/
-│   ├── shared/              # theme.css, logclient.js, adminclient.js, navbar.js, footer.js, admin-modal.js, functions.html, students.html, logs.html, readme.html
+│   ├── shared/              # theme.css, logclient.js, rpcclient.js, adminclient.js, navbar.js, footer.js, admin-modal.js, functions.html, students.html, logs.html, readme.html
 │   ├── landing/             # Landing page (index.html) — experiment cards with sparklines, counts, version badges
 │   └── 404.html             # Styled 404 page
 ├── experiments/
@@ -217,7 +217,7 @@ print(client.add(3, 5))       # 8
 
 ```python
 # List and explore functions
-client.help()                       # Pretty-print all functions with sigs, docs, badges
+client.help()                       # Print all functions with sigs, docs, decorator badges
 funcs = client.list_functions()     # Raw dict of function metadata
 
 # Check registration
@@ -289,7 +289,7 @@ const options = await client.getLogOptions();
 const allLogs = await client.getAllLogs({ studentId: "s001" });  // auto-paginate
 ```
 
-Works in browser and standalone JS (Node 18+, Deno) — zero dependencies, uses native `fetch`.
+Works in browser and standalone JS (Node 18+, Deno) — zero dependencies, uses native `fetch`. The LogClient is read-only (logs and options). To **call** experiment functions from the browser, use the RPCClient (see below).
 
 **Python** (notebooks, scripts):
 
@@ -301,6 +301,67 @@ logs = client.get_logs(student_id="s001", func_name="square", n=50)
 all_logs = client.get_all_logs(func_name="square")  # auto-paginate
 options = client.get_log_options()
 ```
+
+## JavaScript RPC Client (Browser)
+
+Call experiment functions from JavaScript with the same API as the Python client:
+
+```javascript
+import { RPCClient } from "/static/rpcclient.js";
+
+// Auto-detect experiment from URL
+const client = RPCClient.fromCurrentPage({ studentId: "s001" });
+
+// Dynamic dispatch (functions discovered lazily on first call)
+const result = await client.square(7);  // 49
+const sum = await client.add(3, 5);     // 8
+
+// Explicit call with per-call trial override
+await client.call("square", 7, { trial: "demo" });
+
+// Eager init — discover functions upfront so dynamic dispatch works immediately
+const client2 = await new RPCClient({
+  baseUrl: "http://localhost:9000",
+  experiment: "default",
+  studentId: "s001",
+  trial: "run-1",
+}).ready();
+```
+
+### Methods
+
+```javascript
+// List and explore functions
+const funcs = await client.listFunctions();  // { square: { signature, doc, ... }, ... }
+await client.help();                          // Prints to console; returns formatted string
+
+// Check registration
+await client.isRegistered();  // true/false
+
+// Fetch logs (filtered to this student)
+const logs = await client.fetchLogs({ n: 50 });
+const logs2 = await client.fetchLogs({ funcName: "square", trial: "run-1", order: "earliest" });
+```
+
+### Error Handling
+
+```javascript
+import { RPCClient, RPCError, RPCNotRegisteredError, RPCNetworkError } from "/static/rpcclient.js";
+
+try {
+  await client.square(7);
+} catch (err) {
+  if (err instanceof RPCNotRegisteredError) {
+    console.log("Register first!");
+  } else if (err instanceof RPCNetworkError) {
+    console.log("Server unreachable");
+  } else if (err instanceof RPCError) {
+    console.log("Something went wrong:", err.message);
+  }
+}
+```
+
+Exported error classes: `RPCError` (base), `RPCServerError` (non-2xx, has `.status`), `RPCNotRegisteredError` (403), `RPCNetworkError` (connection/timeout), `RPCProtocolError` (bad JSON).
 
 ## Admin Client (Browser)
 
