@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Gradient descent 2D — visualize optimization paths on a non-convex landscape.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📉</text></svg>">
+  <title>Dashboard — Gradient Descent 2D — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+  <style>
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .demo-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem;
+      box-shadow: var(--shadow-sm);
+    }
+    .demo-card h3 {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      color: var(--color-primary);
+    }
+    .demo-card .stat {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 0.25rem;
+    }
+    .demo-card .label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .controls-bar input[type="text"] {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      padding: 0.375rem 0.625rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+      width: 120px;
+    }
+    .controls-bar label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .controls-bar .field { display: flex; flex-direction: column; gap: 0.25rem; }
+    .controls-bar button {
+      font-family: var(--font-display);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-primary);
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .controls-bar button:hover { opacity: 0.85; }
+    .controls-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .controls-bar button.secondary {
+      background: var(--color-surface);
+      color: var(--color-text);
+    }
+    .controls-bar button.secondary:hover { background: var(--color-bg); }
+    #gd-canvas {
+      width: 100%;
+      max-width: 500px;
+      aspect-ratio: 1;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      display: block;
+    }
+    .stat-row { margin-top: 0.75rem; }
+    .primary-highlight {
+      color: var(--color-primary);
+      font-weight: 800;
+    }
+    .error-msg {
+      font-size: 0.75rem;
+      color: #ef4444;
+      margin-top: 0.25rem;
+      min-height: 1em;
+    }
+    .legend {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .legend-diamond {
+      width: 10px;
+      height: 10px;
+      display: inline-block;
+      background: #a855f7;
+      transform: rotate(45deg);
+    }
+    .admin-panel {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-left: 3px solid var(--color-accent, #f59e0b);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .admin-panel .field { display: flex; flex-direction: column; gap: 0.25rem; }
+    .admin-panel label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .admin-panel input[type="number"] {
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      padding: 0.375rem 0.625rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+      width: 110px;
+    }
+    .admin-panel button {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-primary);
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .admin-panel button:hover { opacity: 0.85; }
+    .admin-panel button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .admin-panel button.secondary {
+      background: var(--color-surface);
+      color: var(--color-text);
+    }
+    .admin-panel button.secondary:hover { background: var(--color-bg); }
+    .admin-label {
+      font-size: 0.625rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--color-accent, #f59e0b);
+      border: 1px solid var(--color-accent, #f59e0b);
+      border-radius: var(--radius);
+      padding: 0.15rem 0.5rem;
+    }
+    .gd-status {
+      font-size: 0.8125rem;
+      color: var(--color-text-muted);
+      font-family: var(--font-mono);
+      min-height: 1.25em;
+      margin-bottom: 1rem;
+    }
+    #gd-canvas.picking { cursor: crosshair; }
+  </style>
+</head>
+<body data-page="dashboard">
+  <a class="skip-to-content" href="#main">Skip to content</a>
+  <script src="/static/navbar.js"></script>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>gradient-descent-2d</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Gradient Descent 2D</h1>
+    </div>
+
+    <div class="controls-bar">
+      <div class="field">
+        <label for="student-id">Student ID</label>
+        <input type="text" id="student-id" placeholder="e.g. s001">
+      </div>
+      <div class="field">
+        <label for="trial-name">Trial</label>
+        <input type="text" id="trial-name" placeholder="e.g. run-1">
+      </div>
+      <button id="btn-load" class="secondary">Load Trial</button>
+      <button id="btn-clear" class="secondary">Clear</button>
+    </div>
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="admin-panel" id="admin-panel" style="display:none">
+      <span class="admin-label">Admin</span>
+      <div class="field">
+        <label for="gd-lr">Learning Rate</label>
+        <input type="number" id="gd-lr" value="0.0003" step="0.00001" min="0">
+      </div>
+      <div class="field">
+        <label for="gd-maxiter">Max Iterations</label>
+        <input type="number" id="gd-maxiter" value="300" step="1" min="1" max="5000">
+      </div>
+      <div class="field">
+        <label for="gd-delay">Step Delay (ms)</label>
+        <input type="number" id="gd-delay" value="25" step="10" min="0" max="1000">
+      </div>
+      <button id="btn-gd-run">Run</button>
+      <button id="btn-gd-stop" class="secondary" disabled>Stop</button>
+    </div>
+    <div class="gd-status" id="gd-status"></div>
+
+    <div class="demo-grid">
+      <div class="demo-card">
+        <h3>Function Landscape</h3>
+        <canvas id="gd-canvas" width="500" height="500"></canvas>
+        <div class="legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#34d399"></span> Start</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#f87171"></span> End</span>
+          <span class="legend-item"><span class="legend-diamond"></span> Minima</span>
+        </div>
+      </div>
+
+      <div class="demo-card">
+        <h3>Optimization Stats</h3>
+        <div>
+          <div class="stat primary-highlight" id="stat-iterations">—</div>
+          <div class="label">Iterations</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="stat-start">—</div>
+          <div class="label">Start point (x, y)</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="stat-end">—</div>
+          <div class="label">End point (x, y)</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="stat-fstart">—</div>
+          <div class="label">f(start)</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat primary-highlight" id="stat-fend">—</div>
+          <div class="label">f(end)</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="stat-distance">—</div>
+          <div class="label">Path distance</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/footer.js"></script>
+  <script type="module">
+    import { LogClient } from "/static/logclient.js";
+    import { RPCClient } from "/static/rpcclient.js";
+    import { AdminClient } from "/static/adminclient.js";
+
+    const CANVAS_SIZE = 500;
+    const DOMAIN_MIN = -50;
+    const DOMAIN_MAX = 50;
+    const DOMAIN_RANGE = DOMAIN_MAX - DOMAIN_MIN;
+    const HEATMAP_RES = 200;
+
+    // Grayscale colormap (dark to light)
+    const COLORMAP = [
+      [0.05, 0.05, 0.05],
+      [0.25, 0.25, 0.25],
+      [0.50, 0.50, 0.50],
+      [0.75, 0.75, 0.75],
+      [0.95, 0.95, 0.95],
+    ];
+
+    // State
+    let allPaths = [];  // array of { studentId, points: [{x, y}, ...] }
+    let heatmapCache = null;
+
+    // DOM refs
+    const canvas = document.getElementById("gd-canvas");
+    const ctx = canvas.getContext("2d");
+    const elStudentId = document.getElementById("student-id");
+    const elTrial = document.getElementById("trial-name");
+    const elMsg = document.getElementById("error-msg");
+    const btnLoad = document.getElementById("btn-load");
+    const btnClear = document.getElementById("btn-clear");
+    const elIterations = document.getElementById("stat-iterations");
+    const elStart = document.getElementById("stat-start");
+    const elEnd = document.getElementById("stat-end");
+    const elFStart = document.getElementById("stat-fstart");
+    const elFEnd = document.getElementById("stat-fend");
+    const elDistance = document.getElementById("stat-distance");
+
+    // Admin panel refs
+    const adminPanel = document.getElementById("admin-panel");
+    const elLR = document.getElementById("gd-lr");
+    const elMaxIter = document.getElementById("gd-maxiter");
+    const elDelay = document.getElementById("gd-delay");
+    const btnGDRun = document.getElementById("btn-gd-run");
+    const btnGDStop = document.getElementById("btn-gd-stop");
+    const elGDStatus = document.getElementById("gd-status");
+
+    // Admin state
+    let isAdmin = false;
+    let gdRunning = false;
+    let gdAbort = false;
+
+    // Check admin auth (same pattern as footer.js)
+    fetch("/api/auth-status", { credentials: "same-origin" })
+      .then(r => r.json())
+      .then(d => {
+        if (d.admin) {
+          isAdmin = true;
+          adminPanel.style.display = "";
+        }
+      })
+      .catch(() => {});
+
+    // Persist inputs
+    elStudentId.value = localStorage.getItem("gd2d.studentId") || "";
+    elTrial.value = localStorage.getItem("gd2d.trial") || "";
+    elStudentId.addEventListener("input", () => localStorage.setItem("gd2d.studentId", elStudentId.value));
+    elTrial.addEventListener("input", () => localStorage.setItem("gd2d.trial", elTrial.value));
+
+    // Client-side mirror of f(x,y) for heatmap rendering only
+    function fJS(x, y) {
+      const A = (x - 20) ** 2 + 10 * (y - 20) ** 2;
+      const B = 5 * (x + 20) ** 2 + (y + 20) ** 2;
+      return A * B / 100;
+    }
+
+    function colormap(t) {
+      t = Math.max(0, Math.min(1, t));
+      const n = COLORMAP.length - 1;
+      const i = Math.min(Math.floor(t * n), n - 1);
+      const frac = t * n - i;
+      const c0 = COLORMAP[i], c1 = COLORMAP[i + 1];
+      return [
+        Math.round((c0[0] + (c1[0] - c0[0]) * frac) * 255),
+        Math.round((c0[1] + (c1[1] - c0[1]) * frac) * 255),
+        Math.round((c0[2] + (c1[2] - c0[2]) * frac) * 255),
+      ];
+    }
+
+    function computeHeatmap() {
+      const imgData = ctx.createImageData(HEATMAP_RES, HEATMAP_RES);
+      const data = imgData.data;
+      const step = DOMAIN_RANGE / HEATMAP_RES;
+
+      // First pass: compute log values and find max
+      const vals = new Float64Array(HEATMAP_RES * HEATMAP_RES);
+      let maxVal = 0;
+      for (let row = 0; row < HEATMAP_RES; row++) {
+        const y = DOMAIN_MAX - row * step;
+        for (let col = 0; col < HEATMAP_RES; col++) {
+          const x = DOMAIN_MIN + col * step;
+          const v = Math.log1p(fJS(x, y));
+          vals[row * HEATMAP_RES + col] = v;
+          if (v > maxVal) maxVal = v;
+        }
+      }
+
+      // Second pass: map to colors
+      for (let i = 0; i < vals.length; i++) {
+        const t = maxVal > 0 ? vals[i] / maxVal : 0;
+        const [r, g, b] = colormap(t);
+        data[i * 4] = r;
+        data[i * 4 + 1] = g;
+        data[i * 4 + 2] = b;
+        data[i * 4 + 3] = 255;
+      }
+
+      heatmapCache = imgData;
+    }
+
+    function toCanvas(x, y) {
+      return [
+        (x - DOMAIN_MIN) / DOMAIN_RANGE * CANVAS_SIZE,
+        (DOMAIN_MAX - y) / DOMAIN_RANGE * CANVAS_SIZE,
+      ];
+    }
+
+    function fromCanvas(cx, cy) {
+      return [
+        cx / CANVAS_SIZE * DOMAIN_RANGE + DOMAIN_MIN,
+        DOMAIN_MAX - cy / CANVAS_SIZE * DOMAIN_RANGE,
+      ];
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function drawCanvas() {
+      // Draw heatmap (scale from HEATMAP_RES to CANVAS_SIZE)
+      if (!heatmapCache) computeHeatmap();
+      const tmpCanvas = document.createElement("canvas");
+      tmpCanvas.width = HEATMAP_RES;
+      tmpCanvas.height = HEATMAP_RES;
+      tmpCanvas.getContext("2d").putImageData(heatmapCache, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(tmpCanvas, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+      // Axis ticks and labels
+      const dark = document.documentElement.classList.contains("dark");
+      const textColor = dark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.7)";
+      const tickColor = dark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)";
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+
+      for (const val of [-40, -20, 0, 20, 40]) {
+        const [px] = toCanvas(val, 0);
+        const [, py] = toCanvas(0, val);
+
+        // Vertical grid line
+        ctx.strokeStyle = tickColor;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, CANVAS_SIZE); ctx.stroke();
+        // X label
+        ctx.fillStyle = textColor;
+        ctx.fillText(String(val), px, CANVAS_SIZE - 14);
+
+        // Horizontal grid line
+        ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(CANVAS_SIZE, py); ctx.stroke();
+        // Y label
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(val), 4, py);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+      }
+
+      // Theoretical minima markers (purple diamonds)
+      for (const [mx, my] of [[20, 20], [-20, -20]]) {
+        const [px, py] = toCanvas(mx, my);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = "#a855f7";
+        ctx.fillRect(-5, -5, 10, 10);
+        ctx.restore();
+      }
+
+      // Path colors — distinct, visible on dark heatmap
+      const PATH_COLORS = [
+        "#34d399", "#60a5fa", "#f87171", "#fbbf24", "#a78bfa",
+        "#fb923c", "#2dd4bf", "#f472b6", "#818cf8", "#4ade80",
+      ];
+
+      // Optimization paths (one per student)
+      allPaths.forEach((path, idx) => {
+        const pts = path.points;
+        const color = PATH_COLORS[idx % PATH_COLORS.length];
+
+        // Draw path line
+        if (pts.length > 1) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          const [sx, sy] = toCanvas(pts[0].x, pts[0].y);
+          ctx.moveTo(sx, sy);
+          for (let i = 1; i < pts.length; i++) {
+            const [px, py] = toCanvas(pts[i].x, pts[i].y);
+            ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        }
+
+        // Start marker (subtle ring)
+        if (pts.length > 0) {
+          const first = pts[0];
+          const [sx, sy] = toCanvas(first.x, first.y);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(sx, sy, 3, 0, 2 * Math.PI); ctx.stroke();
+        }
+      });
+    }
+
+    function updateStats() {
+      if (allPaths.length === 0 || allPaths.every(p => p.points.length === 0)) {
+        elIterations.textContent = "—";
+        elStart.textContent = "—";
+        elEnd.textContent = "—";
+        elFStart.textContent = "—";
+        elFEnd.textContent = "—";
+        elDistance.textContent = "—";
+        return;
+      }
+
+      const totalPoints = allPaths.reduce((s, p) => s + p.points.length, 0);
+      const firstPath = allPaths[0].points;
+      const lastPath = allPaths[allPaths.length - 1].points;
+      const first = firstPath[0];
+      const last = lastPath[lastPath.length - 1];
+
+      elIterations.textContent = allPaths.length === 1
+        ? totalPoints
+        : totalPoints + " (" + allPaths.length + " paths)";
+      elStart.textContent = `(${first.x.toFixed(3)}, ${first.y.toFixed(3)})`;
+      elEnd.textContent = `(${last.x.toFixed(3)}, ${last.y.toFixed(3)})`;
+      elFStart.textContent = fJS(first.x, first.y).toFixed(4);
+      elFEnd.textContent = fJS(last.x, last.y).toFixed(4);
+
+      let dist = 0;
+      for (const path of allPaths) {
+        for (let i = 1; i < path.points.length; i++) {
+          const dx = path.points[i].x - path.points[i - 1].x;
+          const dy = path.points[i].y - path.points[i - 1].y;
+          dist += Math.sqrt(dx * dx + dy * dy);
+        }
+      }
+      elDistance.textContent = dist.toFixed(3);
+    }
+
+    function showError(msg) { elMsg.textContent = msg; }
+    function clearError() { elMsg.textContent = ""; }
+
+    async function loadTrial() {
+      clearError();
+      const sid = elStudentId.value.trim();
+      const trial = elTrial.value.trim();
+      if (!sid && !trial) {
+        showError("Enter a Student ID, Trial, or both to load past results.");
+        return;
+      }
+      try {
+        btnLoad.disabled = true;
+        const logClient = LogClient.fromCurrentPage();
+        const filters = { funcName: "df", order: "earliest" };
+        if (sid) filters.studentId = sid;
+        if (trial) filters.trial = trial;
+        const logs = await logClient.getAllLogs(filters);
+        if (!logs.length) {
+          const parts = [];
+          if (sid) parts.push("student \"" + sid + "\"");
+          if (trial) parts.push("trial \"" + trial + "\"");
+          showError("No points found for " + parts.join(" and ") + ".");
+          return;
+        }
+        const grouped = new Map();
+        logs.forEach(l => {
+          if (!grouped.has(l.student_id)) grouped.set(l.student_id, []);
+          grouped.get(l.student_id).push({ x: l.args[0], y: l.args[1] });
+        });
+        allPaths = Array.from(grouped, ([studentId, points]) => ({ studentId, points }));
+        updateStats();
+        drawCanvas();
+      } catch (e) {
+        showError(e.message || String(e));
+      } finally {
+        btnLoad.disabled = false;
+      }
+    }
+
+    function clearAll() {
+      allPaths = [];
+      updateStats();
+      drawCanvas();
+    }
+
+    btnLoad.addEventListener("click", loadTrial);
+    btnClear.addEventListener("click", clearAll);
+
+    // ── Admin: interactive gradient descent ──
+
+    async function runGradientDescent(startX, startY) {
+      if (gdRunning) return;
+      gdRunning = true;
+      gdAbort = false;
+
+      const lr = parseFloat(elLR.value) || 0.0001;
+      const maxIter = parseInt(elMaxIter.value) || 500;
+      const delay = parseInt(elDelay.value) || 50;
+      const studentId = "demo-" + Date.now();
+      const trialName = "demo";
+
+      btnGDRun.disabled = true;
+      btnGDStop.disabled = false;
+      elLR.disabled = true;
+      elMaxIter.disabled = true;
+      elDelay.disabled = true;
+
+      try {
+        const adminClient = AdminClient.fromCurrentPage();
+        await adminClient.addStudent(studentId, "Admin Demo");
+
+        const rpc = RPCClient.fromCurrentPage({
+          studentId: studentId,
+          trial: trialName,
+        });
+
+        const currentPath = { studentId, points: [{ x: startX, y: startY }] };
+        allPaths = [currentPath];
+        drawCanvas();
+        updateStats();
+        elGDStatus.textContent = "Running... step 0/" + maxIter;
+
+        let x = startX, y = startY;
+
+        for (let i = 0; i < maxIter; i++) {
+          if (gdAbort) {
+            elGDStatus.textContent = "Stopped at step " + i + "/" + maxIter;
+            break;
+          }
+
+          const [gx, gy] = await rpc.call("df", x, y);
+
+          x = x - lr * gx;
+          y = y - lr * gy;
+
+          // Clamp to domain
+          x = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, x));
+          y = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, y));
+
+          currentPath.points.push({ x, y });
+          drawCanvas();
+          updateStats();
+          elGDStatus.textContent = "Running... step " + (i + 1) + "/" + maxIter;
+
+          // Converged?
+          if (Math.sqrt(gx * gx + gy * gy) < 1e-6) {
+            elGDStatus.textContent = "Converged at step " + (i + 1) + "!";
+            break;
+          }
+
+          if (delay > 0) await sleep(delay);
+        }
+
+        if (!gdAbort && elGDStatus.textContent.startsWith("Running")) {
+          elGDStatus.textContent = "Finished " + maxIter + " steps. Trial: " + trialName;
+        }
+      } catch (e) {
+        showError("Gradient descent error: " + e.message);
+        elGDStatus.textContent = "Error";
+      } finally {
+        gdRunning = false;
+        btnGDRun.disabled = false;
+        btnGDStop.disabled = true;
+        elLR.disabled = false;
+        elMaxIter.disabled = false;
+        elDelay.disabled = false;
+        canvas.classList.remove("picking");
+      }
+    }
+
+    btnGDRun.addEventListener("click", () => {
+      if (gdRunning) return;
+      canvas.classList.add("picking");
+      elGDStatus.textContent = "Click on the canvas to pick a starting point...";
+      btnGDRun.disabled = true;
+    });
+
+    btnGDStop.addEventListener("click", () => {
+      gdAbort = true;
+      if (canvas.classList.contains("picking")) {
+        canvas.classList.remove("picking");
+        btnGDRun.disabled = false;
+        elGDStatus.textContent = "";
+      }
+    });
+
+    canvas.addEventListener("click", (e) => {
+      if (!isAdmin || !canvas.classList.contains("picking")) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = CANVAS_SIZE / rect.width;
+      const scaleY = CANVAS_SIZE / rect.height;
+      const cx = (e.clientX - rect.left) * scaleX;
+      const cy = (e.clientY - rect.top) * scaleY;
+      const [startX, startY] = fromCanvas(cx, cy);
+      canvas.classList.remove("picking");
+      runGradientDescent(startX, startY);
+    });
+
+    // Redraw on theme toggle
+    const observer = new MutationObserver(() => drawCanvas());
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+    // Initial draw
+    computeHeatmap();
+    drawCanvas();
+  </script>
+</body>
+</html>

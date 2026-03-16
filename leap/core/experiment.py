@@ -184,6 +184,18 @@ class ExperimentInfo:
         self.functions: dict[str, callable] = {}
         self.reload_functions()
 
+    def reload_metadata(self) -> dict:
+        """Re-parse README frontmatter from disk."""
+        self.frontmatter = parse_frontmatter(self.readme_path)
+        self.display_name = self.frontmatter.get("display_name") or self.name
+        self.description = self.frontmatter.get("description", "")
+        self.version = self.frontmatter.get("version", "")
+        self.entry_point = self.frontmatter.get("entry_point", ENTRY_POINT_README)
+        self.require_registration = self.frontmatter.get("require_registration", True)
+        self.leap_version = self.frontmatter.get("leap_version", "")
+        self.version_ok, self.version_message = check_leap_version(self.leap_version)
+        return self.frontmatter
+
     def reload_functions(self) -> int:
         self.functions = load_functions(self.funcs_dir)
         return len(self.functions)
@@ -219,7 +231,19 @@ def discover_experiments(root: Path | None = None) -> dict[str, ExperimentInfo]:
             continue
         name = child.name
         if not validate_experiment_name(name):
-            logger.warning("Skipping invalid experiment name: '%s'", name)
+            suggested = name.lower().replace(" ", "-")
+            if validate_experiment_name(suggested):
+                logger.warning(
+                    "Skipping '%s' — experiment names must be lowercase "
+                    "(matching [a-z0-9][a-z0-9_-]*). Try renaming to '%s'.",
+                    name, suggested,
+                )
+            else:
+                logger.warning(
+                    "Skipping '%s' — experiment names must match [a-z0-9][a-z0-9_-]* "
+                    "(lowercase letters, digits, hyphens, underscores).",
+                    name,
+                )
             continue
         try:
             experiments[name] = ExperimentInfo(name, child)

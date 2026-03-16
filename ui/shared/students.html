@@ -483,6 +483,21 @@
             }
           });
           tr.lastChild.appendChild(delBtn);
+          const delLogsBtn = document.createElement("button");
+          delLogsBtn.type = "button";
+          delLogsBtn.className = "btn btn-sm";
+          delLogsBtn.textContent = "Delete Logs";
+          delLogsBtn.style.marginLeft = "0.5rem";
+          delLogsBtn.addEventListener("click", async function () {
+            if (!confirm("Delete all logs for " + s.student_id + "? The student will remain registered.")) return;
+            try {
+              const res = await admin.deleteLogs(s.student_id);
+              flash(successEl, "Deleted " + res.deleted + " log(s) for " + s.student_id);
+            } catch (err) {
+              flash(errorEl, err.message);
+            }
+          });
+          tr.lastChild.appendChild(delLogsBtn);
           bodyEl.appendChild(tr);
         });
 

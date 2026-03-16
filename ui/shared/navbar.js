@@ -42,7 +42,6 @@
     { id: "logs-link", text: "Logs", href: "/static/logs.html?exp=" + expName, cls: "nav-shared", page: "logs" },
     { id: "functions-link", text: "Functions", href: "/static/functions.html?exp=" + expName, cls: "nav-shared", page: "functions" },
     { id: "readme-link", text: "README", href: "/static/readme.html?exp=" + expName, cls: "nav-shared", page: "readme" },
-    { id: "all-exp-link", text: "All Experiments", href: "/", cls: "nav-shared" }
   ];
 
   links.forEach(function (link) {

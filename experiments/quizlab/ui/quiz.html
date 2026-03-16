@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Quiz Lab — take quizzes with LaTeX, code blocks, and server-side grading.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1f4dd;</text></svg>">
+  <title>Quiz Lab — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <!-- highlight.js -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <!-- marked + DOMPurify -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <style>
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: flex-end;
+      margin-bottom: 1.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .controls-bar .field { display: flex; flex-direction: column; gap: 0.25rem; }
+    .controls-bar label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .controls-bar input[type="text"],
+    .controls-bar select {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      padding: 0.375rem 0.625rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+    }
+    .controls-bar input[type="text"] { width: 120px; }
+    .controls-bar select { min-width: 200px; }
+
+    .quiz-container { max-width: 800px; }
+
+    .question-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.2s;
+    }
+    .question-card.correct { border-color: #22c55e; }
+    .question-card.incorrect { border-color: #ef4444; }
+
+    .question-header {
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.75rem;
+    }
+
+    .question-body {
+      margin-bottom: 1rem;
+      line-height: 1.7;
+    }
+    .question-body p { margin: 0.5em 0; }
+    .question-body pre {
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      overflow-x: auto;
+      font-size: 0.8125rem;
+    }
+    .question-body code {
+      font-family: var(--font-mono);
+      font-size: 0.875em;
+    }
+    .question-body p code {
+      background: var(--color-bg);
+      padding: 0.1em 0.3em;
+      border-radius: 3px;
+    }
+
+    .choices { list-style: none; padding: 0; margin: 0 0 1rem; }
+    .choices li {
+      padding: 0.5rem 0.75rem;
+      margin-bottom: 0.375rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .choices li:hover { background: var(--color-bg); }
+    .choices li.disabled { cursor: default; opacity: 0.7; }
+    .choices li label { cursor: inherit; flex: 1; }
+
+    .numeric-input {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .numeric-input input {
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+      width: 160px;
+    }
+    .numeric-input .hint {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
+
+    .btn-submit {
+      font-family: var(--font-display);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-primary);
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-submit:hover { opacity: 0.85; }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .result-banner {
+      margin-top: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+    .result-banner.correct {
+      background: rgba(34, 197, 94, 0.1);
+      color: #16a34a;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .result-banner.incorrect {
+      background: rgba(239, 68, 68, 0.1);
+      color: #dc2626;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    html.dark .result-banner.correct { color: #4ade80; }
+    html.dark .result-banner.incorrect { color: #f87171; }
+
+    .explanation {
+      margin-top: 0.625rem;
+      padding: 0.75rem 1rem;
+      background: var(--color-bg);
+      border-left: 3px solid var(--color-primary);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 0.8125rem;
+      color: var(--color-text-muted);
+      line-height: 1.6;
+    }
+
+    .error-msg {
+      font-size: 0.8125rem;
+      color: #ef4444;
+      margin-bottom: 1rem;
+      min-height: 1em;
+    }
+
+    .quiz-title {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+    }
+
+    .loading {
+      color: var(--color-text-muted);
+      font-style: italic;
+    }
+  </style>
+</head>
+<body data-page="quiz">
+  <a class="skip-to-content" href="#main">Skip to content</a>
+  <script src="/static/navbar.js"></script>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>quizlab</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Quiz Lab</h1>
+    </div>
+
+    <div class="controls-bar">
+      <div class="field">
+        <label for="student-id">Student ID</label>
+        <input type="text" id="student-id" placeholder="e.g. s001">
+      </div>
+      <div class="field">
+        <label for="quiz-select">Quiz</label>
+        <select id="quiz-select">
+          <option value="">-- select a quiz --</option>
+        </select>
+      </div>
+    </div>
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="quiz-container" id="quiz-container"></div>
+  </main>
+
+  <script src="/static/footer.js"></script>
+  <script type="module">
+    import { RPCClient } from "/static/rpcclient.js";
+
+    // ── State ──
+    let rpc = null;
+    let lastStudentId = null;
+    let currentQuizFile = null;
+    let currentFrontmatter = {};
+    let parsedQuestions = [];  // [{id, body, type, choices, explanation}, ...]
+
+    // ── DOM refs ──
+    const elStudentId = document.getElementById("student-id");
+    const elSelect = document.getElementById("quiz-select");
+    const elContainer = document.getElementById("quiz-container");
+    const elMsg = document.getElementById("error-msg");
+
+    // Persist student ID
+    elStudentId.value = localStorage.getItem("quizlab.studentId") || "";
+    elStudentId.addEventListener("input", () => localStorage.setItem("quizlab.studentId", elStudentId.value));
+
+    function showError(msg) { elMsg.textContent = msg; }
+    function clearError() { elMsg.textContent = ""; }
+
+    function ensureRpc() {
+      const sid = elStudentId.value.trim();
+      if (!sid) throw new Error("Enter a Student ID first.");
+      if (rpc && sid === lastStudentId) return rpc;
+      rpc = RPCClient.fromCurrentPage({ studentId: sid });
+      lastStudentId = sid;
+      return rpc;
+    }
+
+    // ── Markdown rendering ──
+    function renderMarkdown(md) {
+      const html = DOMPurify.sanitize(marked.parse(md));
+      const el = document.createElement("div");
+      el.innerHTML = html;
+      // Syntax highlighting
+      el.querySelectorAll("pre code").forEach(block => hljs.highlightElement(block));
+      // KaTeX
+      if (typeof renderMathInElement === "function") {
+        renderMathInElement(el, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false },
+          ],
+          throwOnError: false,
+        });
+      }
+      return el;
+    }
+
+    // ── Parse quiz markdown (already stripped) ──
+    const QUESTION_RE = /^##\s+Question\s+\d+\s*:\s*(\S+)/;
+    const RADIO_RE = /^- \([ x]\)\s+(.*)$/;
+    const CHECK_RE = /^- \[[ x]\]\s+(.*)$/;
+    const NUMERIC_RE = /^=\s+(.*)$/;
+
+    function parseQuizBody(body) {
+      // Split by question headers
+      const lines = body.split("\n");
+      const questions = [];
+      let current = null;
+
+      for (const line of lines) {
+        const hMatch = line.match(QUESTION_RE);
+        if (hMatch) {
+          if (current) questions.push(current);
+          current = { id: hMatch[1], bodyLines: [], choiceLines: [], explanationLines: [], type: null };
+          continue;
+        }
+        if (!current) continue;
+
+        const stripped = line.trim();
+        // Skip horizontal rules
+        if (/^---+$/.test(stripped)) continue;
+
+        // Explanation (blockquote after choices/answer)
+        if (current.type && stripped.startsWith(">")) {
+          current.explanationLines.push(stripped.slice(1).trim());
+          continue;
+        }
+        // Continue explanation if we already started
+        if (current.explanationLines.length > 0 && !RADIO_RE.test(stripped) && !CHECK_RE.test(stripped) && !NUMERIC_RE.test(stripped)) {
+          if (stripped.startsWith(">")) {
+            current.explanationLines.push(stripped.slice(1).trim());
+          } else if (stripped === "" && current.explanationLines.length > 0) {
+            // blank line in explanation
+          } else if (current.type) {
+            // Non-blockquote line after explanation started — just keep as explanation
+          }
+          continue;
+        }
+
+        // Radio choice
+        const rMatch = stripped.match(RADIO_RE);
+        if (rMatch) {
+          current.type = "radio";
+          current.choiceLines.push(rMatch[1]);
+          continue;
+        }
+
+        // Checkbox choice
+        const cMatch = stripped.match(CHECK_RE);
+        if (cMatch) {
+          current.type = "checkbox";
+          current.choiceLines.push(cMatch[1]);
+          continue;
+        }
+
+        // Numeric answer placeholder
+        const nMatch = stripped.match(NUMERIC_RE);
+        if (nMatch) {
+          current.type = "numeric";
+          continue;
+        }
+
+        // Body text
+        if (!current.type) {
+          current.bodyLines.push(line);
+        }
+      }
+      if (current) questions.push(current);
+
+      return questions.map(q => ({
+        id: q.id,
+        body: q.bodyLines.join("\n").trim(),
+        type: q.type || "radio",
+        choices: q.choiceLines,
+        explanation: q.explanationLines.join("\n").trim() || null,
+      }));
+    }
+
+    // ── Render questions ──
+    function renderQuiz(questions) {
+      elContainer.innerHTML = "";
+      questions.forEach((q, idx) => {
+        const card = document.createElement("div");
+        card.className = "question-card";
+        card.id = "q-" + q.id;
+
+        // Header
+        const header = document.createElement("div");
+        header.className = "question-header";
+        header.textContent = "Question " + (idx + 1);
+        card.appendChild(header);
+
+        // Body
+        const bodyEl = document.createElement("div");
+        bodyEl.className = "question-body";
+        const rendered = renderMarkdown(q.body);
+        bodyEl.appendChild(rendered);
+        card.appendChild(bodyEl);
+
+        // Choices / input
+        if (q.type === "radio" || q.type === "checkbox") {
+          const ul = document.createElement("ul");
+          ul.className = "choices";
+          q.choices.forEach((choice, ci) => {
+            const li = document.createElement("li");
+            const input = document.createElement("input");
+            input.type = q.type === "radio" ? "radio" : "checkbox";
+            input.name = "q_" + q.id;
+            input.value = ci;
+            input.id = "q_" + q.id + "_c" + ci;
+            const label = document.createElement("label");
+            label.htmlFor = input.id;
+            // Render choice label as markdown (inline)
+            const choiceRendered = renderMarkdown(choice);
+            label.appendChild(choiceRendered);
+            li.appendChild(input);
+            li.appendChild(label);
+            li.addEventListener("click", (e) => {
+              if (input.disabled) return;
+              if (e.target !== input) {
+                if (q.type === "radio") {
+                  input.checked = true;
+                } else {
+                  input.checked = !input.checked;
+                }
+              }
+            });
+            ul.appendChild(li);
+          });
+          card.appendChild(ul);
+        } else if (q.type === "numeric") {
+          const div = document.createElement("div");
+          div.className = "numeric-input";
+          const input = document.createElement("input");
+          input.type = "number";
+          input.step = "any";
+          input.placeholder = "Type your answer...";
+          input.id = "q_" + q.id + "_num";
+          const hint = document.createElement("span");
+          hint.className = "hint";
+          hint.textContent = "Enter a number";
+          div.appendChild(input);
+          div.appendChild(hint);
+          card.appendChild(div);
+        }
+
+        // Submit button
+        const btn = document.createElement("button");
+        btn.className = "btn-submit";
+        btn.textContent = "Submit";
+        btn.dataset.qid = q.id;
+        btn.addEventListener("click", () => submitAnswer(q));
+        card.appendChild(btn);
+
+        elContainer.appendChild(card);
+      });
+    }
+
+    // ── Submit answer ──
+    async function submitAnswer(q) {
+      clearError();
+      try {
+        const client = ensureRpc();
+        const card = document.getElementById("q-" + q.id);
+        const btn = card.querySelector(".btn-submit");
+        btn.disabled = true;
+        btn.textContent = "Grading...";
+
+        let answer;
+        if (q.type === "radio") {
+          const checked = card.querySelector('input[name="q_' + q.id + '"]:checked');
+          if (!checked) { showError("Select an answer for Question " + q.id); btn.disabled = false; btn.textContent = "Submit"; return; }
+          answer = parseInt(checked.value, 10);
+        } else if (q.type === "checkbox") {
+          const checked = card.querySelectorAll('input[name="q_' + q.id + '"]:checked');
+          if (checked.length === 0) { showError("Select at least one answer for Question " + q.id); btn.disabled = false; btn.textContent = "Submit"; return; }
+          answer = Array.from(checked).map(c => parseInt(c.value, 10));
+        } else if (q.type === "numeric") {
+          const input = card.querySelector("#q_" + q.id + "_num");
+          if (input.value === "") { showError("Enter a number for Question " + q.id); btn.disabled = false; btn.textContent = "Submit"; return; }
+          answer = parseFloat(input.value);
+        }
+
+        const result = await client.call("grade", currentQuizFile, q.id, answer);
+        showResult(q, card, result);
+      } catch (e) {
+        showError(e.message || String(e));
+        const card = document.getElementById("q-" + q.id);
+        const btn = card.querySelector(".btn-submit");
+        btn.disabled = false;
+        btn.textContent = "Submit";
+      }
+    }
+
+    function showResult(q, card, result) {
+      // Remove any existing result
+      card.querySelectorAll(".result-banner, .explanation").forEach(el => el.remove());
+
+      const allowResubmit = currentFrontmatter.allow_resubmit === true;
+
+      // Lock inputs
+      if (!allowResubmit) {
+        card.querySelectorAll("input").forEach(i => i.disabled = true);
+        card.querySelectorAll(".choices li").forEach(li => li.classList.add("disabled"));
+      }
+
+      // Update button
+      const btn = card.querySelector(".btn-submit");
+      if (allowResubmit) {
+        btn.disabled = false;
+        btn.textContent = "Resubmit";
+      } else {
+        btn.disabled = true;
+        btn.textContent = result.correct ? "Correct" : "Incorrect";
+      }
+
+      // Card border
+      card.classList.remove("correct", "incorrect");
+      card.classList.add(result.correct ? "correct" : "incorrect");
+
+      // Result banner
+      const banner = document.createElement("div");
+      banner.className = "result-banner " + (result.correct ? "correct" : "incorrect");
+      if (result.correct) {
+        banner.textContent = "Correct!";
+      } else {
+        banner.textContent = "Incorrect.";
+      }
+      card.appendChild(banner);
+
+      // Explanation
+      if (result.explanation) {
+        const expEl = document.createElement("div");
+        expEl.className = "explanation";
+        const rendered = renderMarkdown(result.explanation);
+        expEl.appendChild(rendered);
+        card.appendChild(expEl);
+      }
+    }
+
+    // ── Load prior submissions ──
+    async function loadPriorSubmissions() {
+      try {
+        const client = ensureRpc();
+        const logs = await client.fetchLogs({ funcName: "grade", n: 10000, order: "latest" });
+
+        // Build map: question_id → latest result (only for current quiz)
+        const submitted = {};
+        for (const log of logs) {
+          if (!log.args || log.args.length < 3) continue;
+          if (log.args[0] !== currentQuizFile) continue;
+          const qid = log.args[1];
+          if (qid in submitted) continue;  // already have latest
+          if (log.error) continue;
+          submitted[qid] = { answer: log.args[2], result: log.result };
+        }
+
+        // Apply to rendered questions
+        for (const q of parsedQuestions) {
+          if (!(q.id in submitted)) continue;
+          const { answer, result } = submitted[q.id];
+          const card = document.getElementById("q-" + q.id);
+          if (!card) continue;
+
+          // Pre-fill answer
+          if (q.type === "radio") {
+            const input = card.querySelector('#q_' + q.id + '_c' + answer);
+            if (input) input.checked = true;
+          } else if (q.type === "checkbox" && Array.isArray(answer)) {
+            for (const idx of answer) {
+              const input = card.querySelector('#q_' + q.id + '_c' + idx);
+              if (input) input.checked = true;
+            }
+          } else if (q.type === "numeric") {
+            const input = card.querySelector("#q_" + q.id + "_num");
+            if (input) input.value = answer;
+          }
+
+          // Show result
+          showResult(q, card, result);
+        }
+      } catch (e) {
+        // Silently ignore — student may not have submissions yet
+      }
+    }
+
+    // ── Load quiz ──
+    async function loadQuiz(quizFile) {
+      clearError();
+      elContainer.innerHTML = '<p class="loading">Loading quiz...</p>';
+      try {
+        const client = ensureRpc();
+        currentQuizFile = quizFile;
+        const data = await client.call("get_quiz", quizFile);
+        currentFrontmatter = data.frontmatter || {};
+
+        // Title
+        if (currentFrontmatter.title) {
+          const titleEl = document.createElement("h2");
+          titleEl.className = "quiz-title";
+          titleEl.textContent = currentFrontmatter.title;
+          elContainer.innerHTML = "";
+          elContainer.appendChild(titleEl);
+        } else {
+          elContainer.innerHTML = "";
+        }
+
+        parsedQuestions = parseQuizBody(data.body);
+        renderQuiz(parsedQuestions);
+
+        // Render KaTeX in any already-rendered content
+        if (typeof renderMathInElement === "function") {
+          renderMathInElement(elContainer, {
+            delimiters: [
+              { left: "$$", right: "$$", display: true },
+              { left: "$", right: "$", display: false },
+            ],
+            throwOnError: false,
+          });
+        }
+
+        // Load prior submissions
+        await loadPriorSubmissions();
+      } catch (e) {
+        elContainer.innerHTML = "";
+        showError(e.message || String(e));
+      }
+    }
+
+    // ── Init: load quiz list ──
+    async function init() {
+      try {
+        const client = ensureRpc();
+        const quizzes = await client.call("list_quizzes");
+        for (const q of quizzes) {
+          const opt = document.createElement("option");
+          opt.value = q.file;
+          opt.textContent = q.title;
+          elSelect.appendChild(opt);
+        }
+
+        // Auto-load from ?quiz= param
+        const params = new URLSearchParams(window.location.search);
+        const quizParam = params.get("quiz");
+        if (quizParam) {
+          elSelect.value = quizParam;
+          if (elSelect.value === quizParam) {
+            loadQuiz(quizParam);
+          }
+        }
+      } catch (e) {
+        // No student ID yet — that's fine, they'll select after entering ID
+      }
+    }
+
+    elSelect.addEventListener("change", () => {
+      const val = elSelect.value;
+      if (val) loadQuiz(val);
+    });
+
+    // Re-init when student ID changes (to load their submissions)
+    let initTimeout;
+    elStudentId.addEventListener("input", () => {
+      clearTimeout(initTimeout);
+      initTimeout = setTimeout(() => {
+        rpc = null;
+        lastStudentId = null;
+        // Reload quiz list
+        elSelect.innerHTML = '<option value="">-- select a quiz --</option>';
+        init();
+      }, 500);
+    });
+
+    init();
+  </script>
+</body>
+</html>

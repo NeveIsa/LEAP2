@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Monte Carlo pi estimation — sample random points and watch pi converge.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
+  <title>Dashboard — Monte Carlo Pi — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+  <style>
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .demo-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem;
+      box-shadow: var(--shadow-sm);
+    }
+    .demo-card h3 {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      color: var(--color-primary);
+    }
+    .demo-card .stat {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 0.25rem;
+    }
+    .demo-card .label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .controls-bar input[type="text"],
+    .controls-bar input[type="number"] {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      padding: 0.375rem 0.625rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+      width: 120px;
+    }
+    .controls-bar input[type="number"] { width: 80px; }
+    .controls-bar label {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .controls-bar .field { display: flex; flex-direction: column; gap: 0.25rem; }
+    .controls-bar button {
+      font-family: var(--font-display);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-primary);
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .controls-bar button:hover { opacity: 0.85; }
+    .controls-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .controls-bar button.secondary {
+      background: var(--color-surface);
+      color: var(--color-text);
+    }
+    .controls-bar button.secondary:hover { background: var(--color-bg); }
+    #mc-canvas {
+      width: 100%;
+      max-width: 400px;
+      aspect-ratio: 1;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      display: block;
+    }
+    .stat-row { margin-top: 0.75rem; }
+    .pi-highlight {
+      color: var(--color-primary);
+      font-weight: 800;
+    }
+    .error-msg {
+      font-size: 0.75rem;
+      color: #ef4444;
+      margin-top: 0.25rem;
+      min-height: 1em;
+    }
+  </style>
+</head>
+<body data-page="dashboard">
+  <a class="skip-to-content" href="#main">Skip to content</a>
+  <script src="/static/navbar.js"></script>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>monte-carlo</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Monte Carlo Pi</h1>
+    </div>
+
+    <div class="controls-bar">
+      <div class="field">
+        <label for="student-id">Student ID</label>
+        <input type="text" id="student-id" placeholder="e.g. s001">
+      </div>
+      <div class="field">
+        <label for="trial-name">Trial</label>
+        <input type="text" id="trial-name" placeholder="e.g. run-1">
+      </div>
+      <button id="btn-sample">Sample</button>
+      <div class="field">
+        <label for="batch-size">Batch</label>
+        <input type="number" id="batch-size" value="100" min="1" max="100000">
+      </div>
+      <button id="btn-batch">Sample N</button>
+      <button id="btn-clear" class="secondary">Clear</button>
+      <button id="btn-load" class="secondary">Load Trial</button>
+    </div>
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="demo-grid">
+      <div class="demo-card">
+        <h3>Sampling Canvas</h3>
+        <canvas id="mc-canvas" width="400" height="400"></canvas>
+      </div>
+
+      <div class="demo-card">
+        <h3>Statistics</h3>
+        <div>
+          <div class="stat" id="inside-count">0</div>
+          <div class="label">Inside circle</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="total-count">0</div>
+          <div class="label">Total points</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat pi-highlight" id="pi-estimate">—</div>
+          <div class="label">Pi estimate (4 × inside / total)</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="pi-reference" style="font-size:1.25rem;color:var(--color-text-muted)">3.14159265...</div>
+          <div class="label">Reference (π)</div>
+        </div>
+        <div class="stat-row">
+          <div class="stat" id="pi-error" style="font-size:1.25rem">—</div>
+          <div class="label">|estimate − π|</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/footer.js"></script>
+  <script type="module">
+    import { RPCClient } from "/static/rpcclient.js";
+    import { LogClient } from "/static/logclient.js";
+
+    const PI = Math.PI;
+    const CANVAS_SIZE = 400;
+    const MAX_POINTS = 2000;
+
+    // State
+    let points = [];  // { x, y, inside }
+    let insideCount = 0;
+    let totalCount = 0;
+    let rpc = null;
+    let lastStudentId = null;
+
+    // DOM refs
+    const canvas = document.getElementById("mc-canvas");
+    const ctx = canvas.getContext("2d");
+    const elStudentId = document.getElementById("student-id");
+    const elTrial = document.getElementById("trial-name");
+    const elBatchSize = document.getElementById("batch-size");
+    const elInside = document.getElementById("inside-count");
+    const elTotal = document.getElementById("total-count");
+    const elPi = document.getElementById("pi-estimate");
+    const elError = document.getElementById("pi-error");
+    const elMsg = document.getElementById("error-msg");
+    const btnSample = document.getElementById("btn-sample");
+    const btnBatch = document.getElementById("btn-batch");
+    const btnClear = document.getElementById("btn-clear");
+    const btnLoad = document.getElementById("btn-load");
+
+    // Persist inputs
+    elStudentId.value = localStorage.getItem("mc.studentId") || "";
+    elTrial.value = localStorage.getItem("mc.trial") || "";
+    elStudentId.addEventListener("input", () => localStorage.setItem("mc.studentId", elStudentId.value));
+    elTrial.addEventListener("input", () => localStorage.setItem("mc.trial", elTrial.value));
+
+    async function ensureRpc() {
+      const sid = elStudentId.value.trim();
+      if (!sid) throw new Error("Enter a Student ID first.");
+      if (rpc && sid === lastStudentId) return rpc;
+      const opts = { studentId: sid };
+      const trial = elTrial.value.trim();
+      if (trial) opts.trial = trial;
+      rpc = RPCClient.fromCurrentPage(opts);
+      lastStudentId = sid;
+      return rpc;
+    }
+
+    function showError(msg) { elMsg.textContent = msg; }
+    function clearError() { elMsg.textContent = ""; }
+
+    function addPoint(x, y, inside) {
+      points.push({ x, y, inside });
+      if (points.length > MAX_POINTS) points.shift();
+      if (inside) insideCount++;
+      totalCount++;
+    }
+
+    function updateStats() {
+      elInside.textContent = insideCount;
+      elTotal.textContent = totalCount;
+      if (totalCount > 0) {
+        const est = 4.0 * insideCount / totalCount;
+        elPi.textContent = est.toFixed(6);
+        elError.textContent = Math.abs(est - PI).toFixed(6);
+      } else {
+        elPi.textContent = "—";
+        elError.textContent = "—";
+      }
+    }
+
+    function isDark() {
+      return document.documentElement.classList.contains("dark");
+    }
+
+    function drawCanvas() {
+      const dark = isDark();
+      const bg = dark ? "#1e1e2e" : "#ffffff";
+      const gridColor = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+      const axisColor = dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)";
+      const circleColor = getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim() || "#6366f1";
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+      // Grid lines
+      ctx.strokeStyle = gridColor;
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const pos = i * (CANVAS_SIZE / 4);
+        ctx.beginPath(); ctx.moveTo(pos, 0); ctx.lineTo(pos, CANVAS_SIZE); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, pos); ctx.lineTo(CANVAS_SIZE, pos); ctx.stroke();
+      }
+
+      // Axes
+      ctx.strokeStyle = axisColor;
+      ctx.lineWidth = 1;
+      const mid = CANVAS_SIZE / 2;
+      ctx.beginPath(); ctx.moveTo(mid, 0); ctx.lineTo(mid, CANVAS_SIZE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(CANVAS_SIZE, mid); ctx.stroke();
+
+      // Unit circle
+      ctx.strokeStyle = circleColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(mid, mid, mid, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // Points
+      const lastIdx = points.length - 1;
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        const px = (p.x + 1) / 2 * CANVAS_SIZE;
+        const py = (1 - (p.y + 1) / 2) * CANVAS_SIZE;
+        const isLatest = i === lastIdx;
+
+        if (isLatest) {
+          // Glow effect for latest point
+          ctx.shadowColor = p.inside ? "#34d399" : "#f87171";
+          ctx.shadowBlur = 12;
+        }
+
+        ctx.fillStyle = p.inside ? "#34d399" : "#f87171";
+        ctx.beginPath();
+        ctx.arc(px, py, isLatest ? 4 : 2, 0, 2 * Math.PI);
+        ctx.fill();
+
+        if (isLatest) {
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+        }
+      }
+    }
+
+    async function sampleOne() {
+      clearError();
+      try {
+        const client = await ensureRpc();
+        btnSample.disabled = true;
+        btnBatch.disabled = true;
+        const result = await client.call("random_point_square");
+        const [x, y] = result;
+        const inside = await client.call("is_inside_unit_circle", x, y);
+        addPoint(x, y, inside);
+        updateStats();
+        drawCanvas();
+      } catch (e) {
+        showError(e.message || String(e));
+      } finally {
+        btnSample.disabled = false;
+        btnBatch.disabled = false;
+      }
+    }
+
+    async function sampleBatch() {
+      clearError();
+      const n = parseInt(elBatchSize.value, 10);
+      if (!n || n < 1) { showError("Batch size must be at least 1."); return; }
+      try {
+        const client = await ensureRpc();
+        btnSample.disabled = true;
+        btnBatch.disabled = true;
+
+        if (n > 200) {
+          // Use estimate_pi directly for large batches
+          const est = await client.call("estimate_pi", n);
+          // We can't plot individual points, but we can update counts
+          const approxInside = Math.round(est / 4 * n);
+          insideCount += approxInside;
+          totalCount += n;
+          updateStats();
+        } else {
+          for (let i = 0; i < n; i++) {
+            const result = await client.call("random_point_square");
+            const [x, y] = result;
+            const inside = await client.call("is_inside_unit_circle", x, y);
+            addPoint(x, y, inside);
+          }
+          updateStats();
+          drawCanvas();
+        }
+      } catch (e) {
+        showError(e.message || String(e));
+      } finally {
+        btnSample.disabled = false;
+        btnBatch.disabled = false;
+      }
+    }
+
+    function clearAll() {
+      points = [];
+      insideCount = 0;
+      totalCount = 0;
+      updateStats();
+      drawCanvas();
+    }
+
+    async function loadTrial() {
+      clearError();
+      const sid = elStudentId.value.trim();
+      const trial = elTrial.value.trim();
+      if (!sid && !trial) {
+        showError("Enter a Student ID, Trial, or both to load past results.");
+        return;
+      }
+      try {
+        btnLoad.disabled = true;
+        const logClient = LogClient.fromCurrentPage();
+        const filters = { funcName: "is_inside_unit_circle", order: "earliest" };
+        if (sid) filters.studentId = sid;
+        if (trial) filters.trial = trial;
+        const logs = await logClient.getAllLogs(filters);
+        if (!logs.length) {
+          const parts = [];
+          if (sid) parts.push("student \"" + sid + "\"");
+          if (trial) parts.push("trial \"" + trial + "\"");
+          showError("No points found for " + parts.join(" and ") + ".");
+          return;
+        }
+        // Reset state and replay logged points
+        points = [];
+        insideCount = 0;
+        totalCount = 0;
+        for (const log of logs) {
+          const [x, y] = log.args;
+          addPoint(x, y, log.result);
+        }
+        updateStats();
+        drawCanvas();
+      } catch (e) {
+        showError(e.message || String(e));
+      } finally {
+        btnLoad.disabled = false;
+      }
+    }
+
+    btnSample.addEventListener("click", sampleOne);
+    btnBatch.addEventListener("click", sampleBatch);
+    btnClear.addEventListener("click", clearAll);
+    btnLoad.addEventListener("click", loadTrial);
+
+    // Redraw on theme toggle
+    const observer = new MutationObserver(() => drawCanvas());
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+    // Initial draw
+    drawCanvas();
+  </script>
+</body>
+</html>

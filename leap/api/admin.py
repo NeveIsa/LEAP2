@@ -5,10 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from starlette.staticfiles import StaticFiles
 
 from leap.api.deps import get_db_session, get_experiment_info
 from leap.core import auth, storage
-from leap.core.experiment import ExperimentInfo
+from leap.core.experiment import ExperimentInfo, discover_experiments
 from leap.middleware.auth import require_admin
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -26,6 +27,11 @@ class DeleteStudentRequest(BaseModel):
 
 class DeleteLogRequest(BaseModel):
     log_id: int
+
+
+class DeleteLogsRequest(BaseModel):
+    student_id: str | None = None
+    trial: str | None = None
 
 
 class ImportStudentRow(BaseModel):
@@ -88,12 +94,24 @@ async def delete_log(
     return {"ok": True, "log_id": body.log_id}
 
 
-@router.post("/exp/{experiment}/admin/reload-functions")
-async def reload_functions(
+@router.post("/exp/{experiment}/admin/delete-logs")
+async def delete_logs(
+    body: DeleteLogsRequest,
+    session: Session = Depends(get_db_session),
+):
+    if not body.student_id and not body.trial:
+        raise HTTPException(400, detail="Provide at least one of student_id or trial")
+    count = storage.delete_logs(session, student_id=body.student_id, trial=body.trial)
+    return {"ok": True, "deleted": count}
+
+
+@router.post("/exp/{experiment}/admin/reload")
+async def reload_experiment(
     exp_info: ExperimentInfo = Depends(get_experiment_info),
 ):
+    exp_info.reload_metadata()
     count = exp_info.reload_functions()
-    return {"ok": True, "functions_loaded": count}
+    return {"ok": True, "functions_loaded": count, "metadata": exp_info.to_metadata()}
 
 
 @router.get("/exp/{experiment}/admin/export-logs")
@@ -135,3 +153,31 @@ async def change_password(body: ChangePasswordRequest, request: Request):
     new_cred = auth.hash_password(body.new_password)
     auth.save_credentials(new_cred, root)
     return {"ok": True}
+
+
+@router.post("/api/admin/rediscover")
+async def rediscover_experiments(request: Request):
+    root = request.app.state.root
+    current = request.app.state.experiments
+    fresh = discover_experiments(root)
+
+    added = sorted(set(fresh) - set(current))
+    removed = sorted(set(current) - set(fresh))
+
+    # Add new experiments
+    for name in added:
+        current[name] = fresh[name]
+        if fresh[name].ui_dir.is_dir():
+            mount_path = f"/exp/{name}/ui"
+            request.app.mount(mount_path, StaticFiles(directory=str(fresh[name].ui_dir)), name=f"ui-{name}")
+
+    # Remove deleted experiments
+    for name in removed:
+        del current[name]
+
+    return {
+        "ok": True,
+        "added": added,
+        "removed": removed,
+        "total": len(current),
+    }

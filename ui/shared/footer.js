@@ -31,6 +31,10 @@
     '<span class="footer-sep" id="ft-login-sep">&middot;</span> ' +
     '<a href="#" class="footer-admin" id="ft-chpw" style="display:none">Change Password</a>' +
     '<span class="footer-sep" id="ft-chpw-sep" style="display:none">&middot;</span> ' +
+    '<a href="#" class="footer-admin" id="ft-reload" style="display:none">Reload Experiment</a>' +
+    '<span class="footer-sep" id="ft-reload-sep" style="display:none">&middot;</span> ' +
+    '<a href="#" class="footer-admin" id="ft-rediscover" style="display:none">Rediscover</a>' +
+    '<span class="footer-sep" id="ft-rediscover-sep" style="display:none">&middot;</span> ' +
     '<a href="#" class="footer-admin" id="ft-logout" style="display:none">Logout</a>' +
     '<span class="footer-sep" id="ft-logout-sep" style="display:none">&middot;</span> ' +
     '<a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>' +
@@ -60,6 +64,42 @@
       await fetch("/logout", { method: "POST", credentials: "same-origin" });
     } catch (_) {}
     window.location.reload();
+  });
+
+  // ── Detect experiment name from URL ──
+  var expMatch = window.location.pathname.match(/\/exp\/([^/]+)/);
+  var expName = expMatch ? expMatch[1] : new URLSearchParams(window.location.search).get("exp");
+
+  document.getElementById("ft-reload").addEventListener("click", async function (e) {
+    e.preventDefault();
+    if (!expName) return;
+    var link = this;
+    var orig = link.textContent;
+    try {
+      var res = await fetch("/exp/" + encodeURIComponent(expName) + "/admin/reload", {
+        method: "POST", credentials: "same-origin",
+      });
+      if (res.ok) { window.location.reload(); return; }
+      link.textContent = "Error";
+    } catch (_) {
+      link.textContent = "Error";
+    }
+    setTimeout(function () { link.textContent = orig; }, 1500);
+  });
+  document.getElementById("ft-rediscover").addEventListener("click", async function (e) {
+    e.preventDefault();
+    var link = this;
+    try {
+      var res = await fetch("/api/admin/rediscover", {
+        method: "POST", credentials: "same-origin",
+      });
+      if (res.ok) { window.location.reload(); return; }
+      link.textContent = "Error";
+    } catch (_) {
+      link.textContent = "Error";
+    }
+    var orig = "Rediscover";
+    setTimeout(function () { link.textContent = orig; }, 1500);
   });
 
   // ── Health check ──
@@ -97,7 +137,10 @@
         // Hide login link, show admin actions
         document.getElementById("ft-login").style.display = "none";
         document.getElementById("ft-login-sep").style.display = "none";
-        ["ft-chpw", "ft-chpw-sep", "ft-logout", "ft-logout-sep"].forEach(function (id) {
+        var adminIds = ["ft-chpw", "ft-chpw-sep", "ft-logout", "ft-logout-sep"];
+        if (!expName) adminIds.push("ft-rediscover", "ft-rediscover-sep");
+        if (expName) adminIds.push("ft-reload", "ft-reload-sep");
+        adminIds.forEach(function (id) {
           var el = document.getElementById(id);
           if (el) el.style.display = "";
         });

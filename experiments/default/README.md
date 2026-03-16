@@ -3,7 +3,7 @@ name: default
 display_name: Default Lab
 description: Starter experiment demonstrating LEAP2 features — RPC, logging, decorators, and registration.
 version: "1.0.0"
-entry_point: readme
+entry_point: dashboard.html
 leap_version: ">=1.0"
 require_registration: true
 ---
@@ -19,7 +19,7 @@ Use this experiment to verify your setup, learn the client API, and as a referen
 - **`funcs/math_funcs.py`** — Standard logged functions (square, cubic, add, rosenbrock, bisect, gradient_step). Require registration.
 - **`funcs/simulation.py`** — High-frequency functions marked `@nolog` (step, get_position) plus a logged `reset`. Demonstrates selective logging.
 - **`funcs/open_funcs.py`** — Utility functions marked `@noregcheck` (echo, ping, server_time). Callable without registration, still logged.
-- **README (default entry)** — This page; open at `/static/readme.html?exp=default`. **`ui/dashboard.html`** — Experiment dashboard (set `entry_point: dashboard.html` to open it by default).
+- **README (default entry)** — This page; open at `/static/readme.html?exp=default`. **`ui/dashboard.html`** — Experiment dashboard demonstrating LogClient and RPCClient usage (set `entry_point: dashboard.html` to open it by default).
 - **Logs** — View real-time logs at `/static/logs.html?exp=default`.
 
 ### Available Decorators
@@ -84,7 +84,34 @@ logs = LogClient("http://localhost:9000", experiment="default")
 print(logs.get_logs(student_id="s001", n=5))
 ```
 
-**6. Export logs:**
+**6. Try the JavaScript client (browser):**
+
+Open the browser console on any experiment page and use the RPCClient — it mirrors the Python client's API:
+
+```javascript
+import { RPCClient } from "/static/rpcclient.js";
+
+const client = RPCClient.fromCurrentPage({ studentId: "s001" });
+await client.square(7);           // 49
+await client.isRegistered();      // true
+await client.help();              // prints all functions
+await client.fetchLogs({ n: 5 }); // latest 5 logs
+```
+
+Or construct explicitly:
+
+```javascript
+const client = new RPCClient({
+  baseUrl: "http://localhost:9000",
+  experiment: "default",
+  studentId: "s001",
+  trial: "run-1",
+});
+```
+
+See the [dashboard](dashboard.html) for a working example with RPCClient.
+
+**7. Export logs:**
 
 ```bash
 leap export default                   # -> default.jsonl

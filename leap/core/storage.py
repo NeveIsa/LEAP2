@@ -271,6 +271,28 @@ def delete_log(session: Session, log_id: int) -> bool:
     return True
 
 
+def delete_logs(
+    session: Session,
+    student_id: str | None = None,
+    trial: str | None = None,
+) -> int:
+    """Delete logs matching the given filters. Returns count of deleted rows."""
+    conditions = []
+    if student_id is not None:
+        conditions.append(Log.student_id == student_id)
+    if trial is not None:
+        conditions.append(Log.trial == trial)
+    count_stmt = select(sa_func.count()).select_from(Log)
+    del_stmt = delete(Log)
+    for cond in conditions:
+        count_stmt = count_stmt.where(cond)
+        del_stmt = del_stmt.where(cond)
+    count = session.scalar(count_stmt)
+    session.execute(del_stmt)
+    session.commit()
+    return count
+
+
 def get_log_options(session: Session) -> dict:
     students = [
         row[0] for row in session.execute(

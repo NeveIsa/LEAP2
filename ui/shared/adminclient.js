@@ -100,11 +100,24 @@ export class AdminClient {
   }
 
   /**
-   * Reload experiment functions from disk.
-   * @returns {Promise<object>} - { reloaded: count }
+   * Delete logs matching the given filters (student and/or trial).
+   * @param {string} [studentId] - Delete logs for this student.
+   * @param {string} [trial] - Delete logs for this trial.
+   * @returns {Promise<object>} - { ok, deleted }
+   */
+  async deleteLogs(studentId, trial) {
+    const body = {};
+    if (studentId) body.student_id = studentId;
+    if (trial) body.trial = trial;
+    return this._post(this._apiBase + "/admin/delete-logs", body);
+  }
+
+  /**
+   * Reload experiment metadata and functions from disk.
+   * @returns {Promise<object>} - { ok, functions_loaded, metadata }
    */
   async reloadFunctions() {
-    return this._post(this._apiBase + "/admin/reload-functions");
+    return this._post(this._apiBase + "/admin/reload");
   }
 
   /**
@@ -127,6 +140,15 @@ export class AdminClient {
       current_password: currentPassword,
       new_password: newPassword,
     });
+  }
+
+  /**
+   * Trigger server-side rediscovery of experiment directories.
+   * This is a root-level endpoint (not experiment-scoped).
+   * @returns {Promise<object>}
+   */
+  async rediscoverExperiments() {
+    return this._post(this.baseUrl + "/api/admin/rediscover");
   }
 
   /** @private */

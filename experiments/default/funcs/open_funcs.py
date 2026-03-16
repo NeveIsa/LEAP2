@@ -20,3 +20,9 @@ def server_time() -> str:
     """Return current server UTC time. Open to all."""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat() + "Z"
+
+
+@noregcheck
+def nothing() -> None:
+   "Return nothing"
+   return None 

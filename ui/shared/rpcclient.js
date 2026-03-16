@@ -105,11 +105,17 @@ export class RPCClient {
         if (prop in Object.getPrototypeOf(target)) {
           return Reflect.get(target, prop, receiver);
         }
-        // Dynamic dispatch for discovered function names
-        if (target._functions && prop in target._functions) {
-          return (...args) => target.call(prop, ...args);
+        // Dynamic dispatch — lazy-discover via call() if functions not yet loaded
+        if (target._functions) {
+          if (prop in target._functions) {
+            return (...args) => target.call(prop, ...args);
+          }
+          return undefined;
         }
-        return undefined;
+        // Not yet discovered — return lazy caller (call() auto-discovers)
+        // Exclude "then" to avoid breaking await/Promise detection
+        if (prop === "then") return undefined;
+        return (...args) => target.call(prop, ...args);
       },
     });
   }

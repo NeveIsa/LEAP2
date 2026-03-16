@@ -141,7 +141,7 @@ class TestAuth:
             json={"student_id": "x"}).status_code == 401
         assert client.post("/exp/default/admin/delete-log",
             json={"log_id": 1}).status_code == 401
-        assert client.post("/exp/default/admin/reload-functions").status_code == 401
+        assert client.post("/exp/default/admin/reload").status_code == 401
 
     def test_logout(self, admin_client):
         resp = admin_client.post("/logout")
@@ -510,12 +510,12 @@ class TestLogs:
 
 class TestReloadFunctions:
     def test_reload(self, admin_client):
-        resp = admin_client.post("/exp/default/admin/reload-functions")
+        resp = admin_client.post("/exp/default/admin/reload")
         assert resp.status_code == 200
         assert resp.json()["functions_loaded"] >= 1
 
     def test_reload_unknown_experiment(self, admin_client):
-        resp = admin_client.post("/exp/nonexistent/admin/reload-functions")
+        resp = admin_client.post("/exp/nonexistent/admin/reload")
         assert resp.status_code == 404
 
 
@@ -658,6 +658,51 @@ class TestDeleteLog:
         )
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"].lower()
+
+
+# ── Delete Logs (bulk, admin only) ──
+
+
+class TestDeleteLogs:
+    def test_requires_auth(self, client):
+        resp = client.post("/exp/default/admin/delete-logs", json={"student_id": "s001"})
+        assert resp.status_code == 401
+
+    def test_requires_filter(self, admin_client):
+        resp = admin_client.post("/exp/default/admin/delete-logs", json={})
+        assert resp.status_code == 400
+        assert "at least one" in resp.json()["detail"].lower()
+
+    def test_delete_by_student(self, admin_client):
+        _register_student(admin_client)
+        _call_func(admin_client, sid="s001", args=[5])
+        _call_func(admin_client, sid="s001", args=[6])
+        resp = admin_client.post(
+            "/exp/default/admin/delete-logs",
+            json={"student_id": "s001"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 2
+        # Student still exists
+        assert admin_client.get(
+            "/exp/default/is-registered", params={"student_id": "s001"}
+        ).json()["registered"] is True
+        # Logs gone
+        assert len(admin_client.get("/exp/default/logs?n=10").json()["logs"]) == 0
+
+    def test_delete_by_trial(self, admin_client):
+        _register_student(admin_client)
+        _call_func(admin_client, sid="s001", args=[5], trial="run1")
+        _call_func(admin_client, sid="s001", args=[6], trial="run2")
+        resp = admin_client.post(
+            "/exp/default/admin/delete-logs",
+            json={"trial": "run1"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 1
+        remaining = admin_client.get("/exp/default/logs?n=10").json()["logs"]
+        assert len(remaining) == 1
+        assert remaining[0]["trial"] == "run2"
 
 
 # ── Change Password ──

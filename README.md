@@ -197,7 +197,7 @@ def ping():
 
 `@ratelimit` — Control per-student rate limiting. All functions have a default rate limit of 120/minute per student. `@ratelimit("N/period")` overrides (period: `second`, `minute`, `hour`, `day`). `@ratelimit(False)` disables rate limiting entirely. Keyed by `(experiment, function, student_id)` — different students are independently limited.
 
-Functions are reloaded at runtime via `POST /exp/<name>/admin/reload-functions` or the admin UI.
+Functions are reloaded at runtime via `POST /exp/<name>/admin/reload` or the admin UI.
 
 ## Python RPC Client
 
@@ -378,6 +378,7 @@ await admin.reloadFunctions();
 await admin.importStudents([{ student_id: "s002", name: "Bob" }]);
 await admin.exportLogs("csv");                        // or "jsonlines"
 await admin.changePassword("old-pass", "new-pass");
+await admin.rediscoverExperiments();              // root-level, not experiment-scoped
 ```
 
 Requires an active admin session (cookie set by the login page). `fromCurrentPage()` detects the experiment from the URL path (`/exp/<name>/...`) or query param (`?exp=<name>`).
@@ -405,6 +406,19 @@ The navbar is rendered by `navbar.js` — a single shared script included by all
 - **Left** — Experiment-specific links (Lab) at normal prominence
 - **Divider** — Subtle vertical line (horizontal on mobile)
 - **Right** — Shared links (`nav-shared` class) with inline counts fetched from `/api/experiments` and `/exp/<name>/log-options`
+
+### Footer
+
+The footer (`footer.js`) is included on every page. It shows server health status, version, and experiment count. When an admin is logged in, additional actions appear:
+
+| Button | Scope | What it does |
+|---|---|---|
+| **Reload Experiment** | Current experiment | Hot-reloads Python functions from `funcs/` and re-parses README frontmatter — pick up code changes without restarting the server. Only shown on experiment pages. |
+| **Rediscover** | All experiments | Re-scans the `experiments/` directory for new or deleted folders. New experiments get their UI routes mounted; removed ones are unmounted. Use after adding or deleting an experiment folder. |
+| **Change Password** | Global | Opens the password change modal. |
+| **Logout** | Global | Ends the admin session. |
+
+These buttons call `POST /exp/{name}/admin/reload` and `POST /api/admin/rediscover` respectively. The page reloads automatically on success.
 
 ### Landing Page Cards
 
@@ -451,7 +465,7 @@ The DB stores raw JSON strings (`args_json`, `result_json` TEXT columns); the AP
 | `/exp/<name>/admin/students` | GET | Admin | List students |
 | `/exp/<name>/admin/delete-student` | POST | Admin | Delete student + their logs |
 | `/exp/<name>/admin/delete-log` | POST | Admin | Delete a single log entry |
-| `/exp/<name>/admin/reload-functions` | POST | Admin | Reload functions from disk |
+| `/exp/<name>/admin/reload` | POST | Admin | Reload metadata and functions from disk |
 | `/exp/<name>/admin/export-logs` | GET | Admin | Export all logs (JSON; `?format=jsonlines\|csv`) |
 
 **Root-level:**
@@ -464,6 +478,7 @@ The DB stores raw JSON strings (`args_json`, `result_json` TEXT columns); the AP
 | `/api/auth-status` | GET | Check admin login (`{admin: true/false}`) |
 | `/login` | GET/POST | Authenticate (JSON body; rate-limited to 5/min); GET redirects to landing |
 | `/api/admin/change-password` | POST | Admin | Change admin password (requires current + new) |
+| `/api/admin/rediscover` | POST | Admin | Re-scan experiments directory (add new, remove deleted) |
 | `/logout` | POST | Clear session |
 
 **RPC payload:**
@@ -678,7 +693,8 @@ require_registration: true
 | `leap_version` | _(none)_ | Minimum LEAP2 version required (enforced; `>=1.0`, `==1.0.0`, or bare `1.0`) |
 | `require_registration` | `true` | Require student registration for RPC |
 
-Experiment names must match `[a-z0-9][a-z0-9_-]*` (lowercase, digits, hyphens, underscores). Invalid folder names are skipped at discovery with a warning.
+> [!WARNING]
+> **Experiment names must be lowercase.** Folder names must match `[a-z0-9][a-z0-9_-]*` — only lowercase letters, digits, hyphens, and underscores are allowed (e.g. `monte-carlo`, `gradient-descent-2d`). Folders with uppercase characters (like `My-Experiment`) are **silently skipped** at discovery. Use `display_name` in frontmatter for human-readable names.
 
 ## Planned
 

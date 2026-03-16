@@ -259,6 +259,31 @@ class TestLogCRUD:
     def test_delete_log_nonexistent(self, db_session):
         assert storage.delete_log(db_session, 99999) is False
 
+    def test_delete_logs_by_student(self, db_session):
+        for _ in range(2):
+            storage.add_log(db_session, student_id="s001", experiment="t", func_name="f", args=[])
+        storage.add_log(db_session, student_id="s002", experiment="t", func_name="f", args=[])
+        assert storage.delete_logs(db_session, student_id="s001") == 2
+        remaining = storage.query_logs(db_session)
+        assert len(remaining) == 1
+        assert remaining[0]["student_id"] == "s002"
+
+    def test_delete_logs_by_trial(self, db_session):
+        storage.add_log(db_session, student_id="s001", experiment="t", func_name="f", args=[], trial="run1")
+        storage.add_log(db_session, student_id="s001", experiment="t", func_name="f", args=[], trial="run2")
+        assert storage.delete_logs(db_session, trial="run1") == 1
+        remaining = storage.query_logs(db_session)
+        assert len(remaining) == 1
+        assert remaining[0]["trial"] == "run2"
+
+    def test_delete_logs_by_both(self, db_session):
+        storage.add_log(db_session, student_id="s001", experiment="t", func_name="f", args=[], trial="run1")
+        storage.add_log(db_session, student_id="s001", experiment="t", func_name="f", args=[], trial="run2")
+        storage.add_log(db_session, student_id="s002", experiment="t", func_name="f", args=[], trial="run1")
+        assert storage.delete_logs(db_session, student_id="s001", trial="run1") == 1
+        remaining = storage.query_logs(db_session)
+        assert len(remaining) == 2
+
     def test_log_string_result(self, db_session):
         storage.add_log(
             db_session,
