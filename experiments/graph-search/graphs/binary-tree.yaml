@@ -1,0 +1,21 @@
+name: binary-tree
+type: adjacency
+display_name: "Binary Tree"
+description: "A complete binary tree of depth 3 (7 nodes)."
+start: "1"
+edges:
+  "1": ["2", "3"]
+  "2": ["1", "4", "5"]
+  "3": ["1", "6", "7"]
+  "4": ["2"]
+  "5": ["2"]
+  "6": ["3"]
+  "7": ["3"]
+positions:
+  "1": [300, 50]
+  "2": [150, 150]
+  "3": [450, 150]
+  "4": [75, 250]
+  "5": [225, 250]
+  "6": [375, 250]
+  "7": [525, 250]

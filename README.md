@@ -16,7 +16,7 @@ LEAP2 is a clean-room reimplementation of LEAP, fixing tight coupling problems (
 - **Automatic Logging** — Every RPC call is logged with args, result, timestamp, student ID, and trial
 - **Student Registration** — Per-experiment registration with admin management; bulk CSV import via CLI, API, and UI
 - **Per-Function Rate Limiting** — Default 120 calls/minute per student; override with `@ratelimit("10/minute")` or disable with `@ratelimit(False)`
-- **Flexible Decorators** — `@nolog` for high-frequency calls, `@noregcheck` for open functions, `@ratelimit` for rate control, `@adminonly` for restricted functions
+- **Flexible Decorators** — `@nolog` for high-frequency calls, `@noregcheck` for open functions, `@ratelimit` for rate control, `@adminonly` for restricted functions, `@withctx` for implicit request context
 - **Decoupled Visualizations** — JS + Python Log Clients abstract log queries; visualizations depend on the client interface, not raw API calls
 - **Rich Client** — Python RPCClient with `is_registered()`, `help()`, `fetch_logs()`, structured exception hierarchy (`RPCError`, `RPCNotRegisteredError`, etc.); matching JavaScript RPCClient for browser use
 - **Admin Client** — Browser-side student management, log deletion, and function reloading via `adminclient.js`
@@ -54,7 +54,7 @@ LEAP2/
 │   ├── cli.py               # Typer CLI (shared functions used by API too)
 │   ├── core/                # Pure logic, no HTTP
 │   │   ├── storage.py       # SQLAlchemy models, DuckDB CRUD
-│   │   ├── rpc.py           # RPC execution, @nolog, @noregcheck, @ratelimit, @adminonly
+│   │   ├── rpc.py           # RPC execution, @nolog, @noregcheck, @ratelimit, @adminonly, @withctx/ctx
 │   │   ├── auth.py          # PBKDF2 hashing, credentials I/O
 │   │   └── experiment.py    # Discovery, README parsing, function loading
 │   ├── api/                 # FastAPI routers (thin wrappers over core)
@@ -72,13 +72,14 @@ LEAP2/
 │   ├── landing/             # Landing page (index.html) — experiment cards with sparklines, counts, version badges
 │   └── 404.html             # Styled 404 page
 ├── experiments/
+│   ├── graph-search/        # BFS/DFS graph exploration (grids, trees, custom graphs)
 │   └── default/             # Bundled demo experiment
 │       ├── README.md        # YAML frontmatter + instructions
 │       ├── funcs/           # Python functions (auto-discovered)
 │       ├── ui/              # optional; entry_point can be "readme" or a file in ui/
 │       └── db/              # DuckDB file (gitignored)
 ├── config/                  # admin_credentials.json (gitignored)
-├── tests/                   # pytest suite (488 tests)
+├── tests/                   # pytest suite (524 tests)
 └── pyproject.toml
 ```
 
@@ -131,7 +132,7 @@ def gradient_step(x: float, lr: float = 0.1) -> float:
     return x - lr * 2 * (x - 3)
 ```
 
-Public functions (names not starting with `_`) are auto-discovered and exposed at `POST /exp/my-experiment/call`. If a module defines `__all__`, only those names are exported. Functions prefixed with `_` are private — they stay hidden from the API but can be used as helpers by your exposed functions:
+Public functions (names not starting with `_`) are auto-discovered and exposed at `POST /exp/my-experiment/call`. If a module defines `__all__`, only those names are exported. Functions prefixed with `_` are private — they stay hidden from the API but can be used as helpers by your exposed functions. Imported names (e.g. `from leap import nolog`) are automatically filtered out — only functions defined in the module file are exposed:
 
 ```python
 import numpy as np
@@ -168,7 +169,7 @@ If the cloned experiment contains a `requirements.txt`, `leap install` will auto
 ## Decorators
 
 ```python
-from leap import adminonly, nolog, noregcheck, ratelimit
+from leap import adminonly, nolog, noregcheck, ratelimit, withctx, ctx
 
 @nolog
 def step(dx):
@@ -195,6 +196,12 @@ def expensive_simulation(x):
 def ping():
     """Unrestricted — no rate limit."""
     return "pong"
+
+@withctx
+def start():
+    """Read caller context implicitly — no extra parameters exposed to students."""
+    graph = load_graph(ctx.trial)
+    return {"start": graph["start"], "student": ctx.student_id}
 ```
 
 `@nolog` — Skip logging for high-frequency calls (real-time UI updates, animation, polling). The function still executes and returns results; it just doesn't create a log entry.
@@ -204,6 +211,8 @@ def ping():
 `@adminonly` — Restrict the function to admin sessions only. Non-admin callers receive a 403 error. Useful for data management, reset functions, or viewing all students' records. The check happens at the API layer before the function executes.
 
 `@ratelimit` — Control per-student rate limiting. All functions have a default rate limit of 120/minute per student. `@ratelimit("N/period")` overrides (period: `second`, `minute`, `hour`, `day`). `@ratelimit(False)` disables rate limiting entirely. Keyed by `(experiment, function, student_id)` — different students are independently limited.
+
+`@withctx` — Inject request context (`student_id`, `trial`, `experiment`) into the function via `ctx`. Import `ctx` from `leap` and access `ctx.student_id`, `ctx.trial`, `ctx.experiment` inside any `@withctx` function. The context is per-request (uses `contextvars`), so there are no race conditions. The `ctx` parameter does **not** appear in the function signature — students never see it.
 
 Functions are reloaded at runtime via `POST /exp/<name>/admin/reload` or the admin UI.
 
@@ -645,7 +654,7 @@ The same format is accepted by the API (`POST /exp/<name>/admin/import-students`
 # Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (488 tests)
+# Run tests (524 tests)
 pytest tests/
 
 # Run with auto-reload
@@ -658,7 +667,11 @@ uvicorn leap.main:app --reload --port 9000
 tests/
 ├── conftest.py               # Shared fixtures (tmp_root, tmp_credentials)
 ├── test_quizlab.py           # Quizlab: parsing, grading, get_all_scores (14 tests)
-├── core/                     # storage, auth, experiment, rpc (198 tests)
+├── core/                     # storage, auth, experiment, rpc, withctx (212 tests)
+│   ├── test_withctx.py       # @withctx decorator + ctx proxy injection (10 tests)
+│   └── test_function_discovery.py  # Import filtering in function loading (4 tests)
+├── experiments/
+│   └── test_graph_search.py  # Graph loading, neighbors, get_graph, layouts (22 tests)
 ├── api/
 │   ├── test_api.py           # Full API integration (89 tests)
 │   ├── test_ui_serving.py    # Static mounts, landing, login (22 tests)
@@ -731,7 +744,8 @@ Currently the README covers all of this in condensed form.
 
 **Features:**
 
-- **Algorithm visualizations** — Port BFS grid, gradient descent, Monte Carlo, power method from LEAP using the Log Client (experiment-specific, in `experiments/<name>/ui/`)
+- ~~**Graph search**~~ — Implemented: `graph-search` experiment with BFS/DFS exploration across grids, trees, and custom graphs; YAML graph definitions; shared SVG renderer; interactive dashboard; admin log-replay visualization
+- **Algorithm visualizations** — Port gradient descent, Monte Carlo, power method from LEAP using the Log Client (experiment-specific, in `experiments/<name>/ui/`)
 - ~~**Quiz system**~~ — Implemented: `quizlab` experiment with markdown quizzes, server-side grading, `@nolog` private storage, admin scores page with CSV export
 - **Monaco/uPlot IDE dashboard** — Rich in-browser coding + plotting
 - **DB migrations** — Schema versioning for future LEAP2 changes

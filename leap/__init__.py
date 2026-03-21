@@ -2,6 +2,6 @@
 
 __version__ = "1.0.0"
 
-from leap.core.rpc import adminonly, nolog, noregcheck, ratelimit
+from leap.core.rpc import adminonly, ctx, nolog, noregcheck, ratelimit, withctx
 
-__all__ = ["adminonly", "nolog", "noregcheck", "ratelimit", "__version__"]
+__all__ = ["adminonly", "ctx", "nolog", "noregcheck", "ratelimit", "withctx", "__version__"]

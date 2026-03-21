@@ -1,0 +1,7 @@
+name: grid-3x3
+type: grid
+display_name: "3×3 Grid"
+description: "A small 3×3 grid graph. Each cell connects to its 4-directional neighbors."
+rows: 3
+cols: 3
+start: "0,0"

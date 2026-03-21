@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Graph Search — explore graphs using BFS or DFS by discovering neighbors.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+  <title>Dashboard — Graph Search — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+  <style>
+    .gs-layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    @media (max-width: 860px) {
+      .gs-layout { grid-template-columns: 1fr; }
+    }
+
+    /* Graph viewport */
+    .graph-viewport {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 1rem;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+    }
+    .graph-viewport svg {
+      flex: 1;
+      width: 100%;
+      min-height: 360px;
+    }
+    .graph-viewport-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-muted);
+      font-size: 0.875rem;
+      font-style: italic;
+    }
+
+    /* Legend bar */
+    .graph-legend {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--color-border);
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1.5px solid transparent;
+    }
+    .legend-swatch-start {
+      background: none;
+      border: 2px dashed #e09550;
+    }
+
+    /* Side panel */
+    .gs-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .gs-panel-section {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 1rem 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+    .gs-panel-section h3 {
+      font-family: var(--font-display);
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: var(--color-primary);
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+    .gs-panel-section .form-label {
+      font-size: 0.75rem;
+      margin-bottom: 0.25rem;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .gs-panel-section select,
+    .gs-panel-section input[type="text"] {
+      width: 100%;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.8125rem;
+      font-family: var(--font-mono);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+      outline: none;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .gs-panel-section select:focus,
+    .gs-panel-section input[type="text"]:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-light);
+    }
+    .gs-graph-desc {
+      font-size: 0.8125rem;
+      color: var(--color-text-muted);
+      margin-top: 0.5rem;
+      line-height: 1.5;
+      min-height: 1.5em;
+    }
+    .gs-graph-meta {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.375rem;
+      flex-wrap: wrap;
+    }
+    .gs-graph-meta .badge {
+      font-size: 0.6875rem;
+    }
+
+    /* Neighbor results */
+    .gs-neighbors {
+      margin-top: 0.5rem;
+    }
+    .gs-neighbor-label {
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 0.375rem;
+    }
+    .gs-neighbor-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.375rem;
+    }
+    .gs-neighbor-chip {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: var(--color-primary-light);
+      color: var(--color-primary);
+      border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .gs-neighbor-chip:hover {
+      background: var(--color-primary);
+      color: #fff;
+    }
+
+    /* Traversal history */
+    .gs-history {
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      line-height: 1.8;
+      padding: 0.5rem;
+      background: var(--color-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--color-border);
+    }
+    .gs-history-entry {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+    .gs-history-step {
+      color: var(--color-text-muted);
+      min-width: 2.5em;
+      text-align: right;
+      opacity: 0.5;
+    }
+    .gs-history-node {
+      color: var(--color-primary);
+      font-weight: 600;
+    }
+    .gs-history-arrow {
+      opacity: 0.3;
+    }
+
+    /* Status line */
+    .gs-status {
+      font-size: 0.8125rem;
+      color: var(--color-text-muted);
+      font-family: var(--font-mono);
+      min-height: 1.25em;
+      margin-bottom: 0.5rem;
+    }
+
+    .gs-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .gs-actions .btn {
+      flex: 1;
+      font-size: 0.8125rem;
+      padding: 0.4rem 0.75rem;
+    }
+  </style>
+</head>
+<body data-page="dashboard">
+  <a class="skip-to-content" href="#main">Skip to content</a>
+  <script src="/static/navbar.js"></script>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>graph-search</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Graph Search</h1>
+      <p>Explore graphs by discovering neighbors. Click nodes to traverse — then implement BFS or DFS in Python.</p>
+    </div>
+
+    <div class="gs-status" id="gs-status"></div>
+
+    <div class="gs-layout">
+      <!-- Graph visualization -->
+      <div class="graph-viewport">
+        <div class="graph-viewport-empty" id="graph-empty">Select a graph to begin exploring</div>
+        <svg id="graph-svg" style="display:none"></svg>
+        <div class="graph-legend" id="graph-legend" style="display:none">
+          <span class="legend-item"><span class="legend-swatch" style="background:#d6d3d1"></span> Unvisited</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#1a6b5a"></span> Visited</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#c4653a"></span> Current</span>
+          <span class="legend-item"><span class="legend-swatch legend-swatch-start"></span> Start</span>
+        </div>
+      </div>
+
+      <!-- Side panel -->
+      <div class="gs-panel">
+        <!-- Setup section -->
+        <div class="gs-panel-section">
+          <h3>Setup</h3>
+          <div style="margin-bottom:0.75rem">
+            <div class="form-label">Student ID</div>
+            <input type="text" id="student-id" placeholder="e.g. s001">
+          </div>
+          <div>
+            <div class="form-label">Graph</div>
+            <select id="graph-select">
+              <option value="">Loading graphs...</option>
+            </select>
+            <div class="gs-graph-desc" id="graph-desc"></div>
+            <div class="gs-graph-meta" id="graph-meta"></div>
+          </div>
+          <div class="gs-actions">
+            <button class="btn btn-primary" id="btn-start" disabled>Start</button>
+            <button class="btn" id="btn-reset" disabled>Reset</button>
+          </div>
+        </div>
+
+        <!-- Exploration section -->
+        <div class="gs-panel-section" id="explore-section" style="display:none">
+          <h3>Exploration</h3>
+          <div class="gs-neighbor-label">Current node: <strong id="current-node-label">—</strong></div>
+          <div class="gs-neighbors" id="neighbors-container">
+            <div class="gs-neighbor-label">Neighbors</div>
+            <div class="gs-neighbor-list" id="neighbor-list"></div>
+          </div>
+        </div>
+
+        <!-- History section -->
+        <div class="gs-panel-section" id="history-section" style="display:none">
+          <h3>Traversal History</h3>
+          <div class="gs-history" id="history-list"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/footer.js"></script>
+  <script type="module">
+    import { RPCClient } from "/static/rpcclient.js";
+    import { GraphRenderer } from "./graph-renderer.js";
+
+    // DOM refs
+    var elStudentId = document.getElementById("student-id");
+    var elGraphSelect = document.getElementById("graph-select");
+    var elGraphDesc = document.getElementById("graph-desc");
+    var elGraphMeta = document.getElementById("graph-meta");
+    var btnStart = document.getElementById("btn-start");
+    var btnReset = document.getElementById("btn-reset");
+    var elStatus = document.getElementById("gs-status");
+    var elGraphEmpty = document.getElementById("graph-empty");
+    var elGraphSvg = document.getElementById("graph-svg");
+    var elGraphLegend = document.getElementById("graph-legend");
+    var elExploreSection = document.getElementById("explore-section");
+    var elHistorySection = document.getElementById("history-section");
+    var elCurrentNodeLabel = document.getElementById("current-node-label");
+    var elNeighborList = document.getElementById("neighbor-list");
+    var elHistoryList = document.getElementById("history-list");
+
+    // State
+    var graphData = null;
+    var visited = new Set();
+    var currentNode = null;
+    var history = [];
+    var rpc = null;
+    var renderer = null;
+
+    // Persist student ID
+    elStudentId.value = localStorage.getItem("gs.studentId") || "";
+    elStudentId.addEventListener("input", function() {
+      localStorage.setItem("gs.studentId", elStudentId.value);
+    });
+
+    // Load graph list
+    (async function() {
+      try {
+        var tempRpc = RPCClient.fromCurrentPage({ studentId: "_anon" });
+        var graphs = await tempRpc.call("list_graphs");
+        elGraphSelect.innerHTML = '<option value="">— choose a graph —</option>';
+        graphs.forEach(function(g) {
+          var opt = document.createElement("option");
+          opt.value = g.name;
+          opt.textContent = g.display_name + " (" + g.type + ")";
+          opt.dataset.desc = g.description;
+          opt.dataset.type = g.type;
+          if (g.rows) { opt.dataset.rows = g.rows; opt.dataset.cols = g.cols; }
+          if (g.node_count) opt.dataset.nodeCount = g.node_count;
+          elGraphSelect.appendChild(opt);
+        });
+        updateGraphDesc();
+      } catch (e) {
+        elGraphSelect.innerHTML = '<option value="">Error loading graphs</option>';
+        elStatus.textContent = "Failed to load graphs: " + e.message;
+      }
+    })();
+
+    elGraphSelect.addEventListener("change", updateGraphDesc);
+
+    function updateGraphDesc() {
+      var opt = elGraphSelect.selectedOptions[0];
+      if (!opt || !opt.value) {
+        elGraphDesc.textContent = "";
+        elGraphMeta.innerHTML = "";
+        btnStart.disabled = true;
+        return;
+      }
+      elGraphDesc.textContent = opt.dataset.desc || "";
+      var meta = '';
+      if (opt.dataset.type === "grid") {
+        meta = '<span class="badge">' + opt.dataset.rows + '×' + opt.dataset.cols + ' grid</span>';
+      } else if (opt.dataset.nodeCount) {
+        meta = '<span class="badge">' + opt.dataset.nodeCount + ' nodes</span>';
+      }
+      meta += '<span class="badge badge-open">' + opt.dataset.type + '</span>';
+      elGraphMeta.innerHTML = meta;
+      btnStart.disabled = !elStudentId.value.trim();
+    }
+
+    elStudentId.addEventListener("input", function() {
+      btnStart.disabled = !elStudentId.value.trim() || !elGraphSelect.value;
+    });
+
+    // Start exploration
+    btnStart.addEventListener("click", async function() {
+      var sid = elStudentId.value.trim();
+      var graphName = elGraphSelect.value;
+      if (!sid || !graphName) return;
+
+      btnStart.disabled = true;
+      elStatus.textContent = "Loading graph...";
+
+      try {
+        rpc = RPCClient.fromCurrentPage({ studentId: sid, trial: graphName });
+
+        // Fetch full graph for rendering
+        var tempRpc = RPCClient.fromCurrentPage({ studentId: "_anon" });
+        graphData = await tempRpc.call("get_graph", graphName);
+
+        // Get start info
+        var info = await rpc.call("start");
+
+        // Setup renderer
+        elGraphEmpty.style.display = "none";
+        elGraphSvg.style.display = "";
+        elGraphLegend.style.display = "";
+
+        renderer = new GraphRenderer(elGraphSvg, { interactive: true });
+        renderer.onNodeClick = onNodeClick;
+        renderer.setGraph(graphData);
+
+        // Initialize traversal state
+        visited = new Set();
+        currentNode = info.start;
+        visited.add(currentNode);
+        history = [{ step: 1, node: currentNode, action: "start" }];
+
+        updateRendererState();
+        updateExplorePanel();
+        updateHistory();
+
+        elExploreSection.style.display = "";
+        elHistorySection.style.display = "";
+        btnReset.disabled = false;
+        elGraphSelect.disabled = true;
+        elStudentId.disabled = true;
+        elStatus.textContent = "Click a neighbor to explore. Start: " + info.start;
+      } catch (e) {
+        elStatus.textContent = "Error: " + e.message;
+        btnStart.disabled = false;
+      }
+    });
+
+    // Reset
+    btnReset.addEventListener("click", function() {
+      graphData = null;
+      visited = new Set();
+      currentNode = null;
+      history = [];
+      rpc = null;
+      renderer = null;
+
+      elGraphEmpty.style.display = "";
+      elGraphSvg.style.display = "none";
+      elGraphSvg.innerHTML = "";
+      elGraphLegend.style.display = "none";
+      elExploreSection.style.display = "none";
+      elHistorySection.style.display = "none";
+      btnReset.disabled = true;
+      elGraphSelect.disabled = false;
+      elStudentId.disabled = false;
+      elStatus.textContent = "";
+      updateGraphDesc();
+    });
+
+    async function onNodeClick(nodeId) {
+      if (!rpc || !graphData) return;
+
+      // Only allow clicking neighbors of current node
+      var neighbors = graphData.edges[currentNode] || [];
+      if (neighbors.indexOf(nodeId) === -1 && nodeId !== currentNode) {
+        elStatus.textContent = "Node " + nodeId + " is not a neighbor of " + currentNode;
+        return;
+      }
+      if (nodeId === currentNode) return;
+
+      try {
+        // Call neighbor RPC (logs the call)
+        await rpc.call("neighbor", nodeId);
+
+        currentNode = nodeId;
+        visited.add(nodeId);
+        history.push({ step: history.length + 1, node: nodeId, action: "visit" });
+
+        updateRendererState();
+        updateExplorePanel();
+        updateHistory();
+
+        var remaining = graphData.nodes.length - visited.size;
+        elStatus.textContent = "Visited " + nodeId + ". " + visited.size + "/" + graphData.nodes.length + " nodes explored.";
+
+        if (remaining === 0) {
+          elStatus.textContent = "All " + graphData.nodes.length + " nodes visited!";
+        }
+      } catch (e) {
+        elStatus.textContent = "Error: " + e.message;
+      }
+    }
+
+    function updateRendererState() {
+      if (!renderer) return;
+      renderer.setState({
+        visited: visited,
+        current: currentNode,
+        start: graphData.start,
+      });
+    }
+
+    async function updateExplorePanel() {
+      elCurrentNodeLabel.textContent = currentNode || "—";
+
+      if (!graphData || !currentNode) {
+        elNeighborList.innerHTML = "";
+        return;
+      }
+
+      var neighbors = graphData.edges[currentNode] || [];
+      elNeighborList.innerHTML = "";
+      neighbors.forEach(function(nbr) {
+        var chip = document.createElement("span");
+        chip.className = "gs-neighbor-chip";
+        chip.textContent = nbr;
+        if (visited.has(nbr)) {
+          chip.style.opacity = "0.5";
+          chip.title = "Already visited";
+        }
+        chip.addEventListener("click", function() { onNodeClick(nbr); });
+        elNeighborList.appendChild(chip);
+      });
+    }
+
+    function updateHistory() {
+      elHistoryList.innerHTML = "";
+      history.forEach(function(entry) {
+        var div = document.createElement("div");
+        div.className = "gs-history-entry";
+        div.innerHTML =
+          '<span class="gs-history-step">' + entry.step + '.</span>' +
+          '<span class="gs-history-node">' + entry.node + '</span>' +
+          (entry.action === "start" ? ' <span style="opacity:0.4;font-size:0.625rem">(start)</span>' : '');
+        elHistoryList.appendChild(div);
+      });
+      elHistoryList.scrollTop = elHistoryList.scrollHeight;
+    }
+  </script>
+</body>
+</html>

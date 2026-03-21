@@ -131,6 +131,9 @@ def load_functions(funcs_dir: Path) -> dict[str, callable]:
                 continue
             obj = getattr(module, attr_name)
             if callable(obj) and not isinstance(obj, type) and not isinstance(obj, types.ModuleType):
+                # Skip imports — only export functions defined in this module
+                if exported is None and getattr(obj, "__module__", None) != module_name:
+                    continue
                 if attr_name in functions:
                     logger.warning(
                         "Duplicate function '%s' in %s (already loaded); overwriting",

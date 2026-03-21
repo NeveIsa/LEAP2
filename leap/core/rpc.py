@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import re
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from leap.core import storage
@@ -69,6 +71,32 @@ def adminonly(func):
     return func
 
 
+@dataclass
+class Context:
+    """Call metadata available to @withctx functions via ``from leap import ctx``."""
+    student_id: str
+    trial: str | None
+    experiment: str
+
+
+_ctx_var: contextvars.ContextVar[Context] = contextvars.ContextVar("leap_ctx")
+
+
+class _CtxProxy:
+    """Proxy that forwards attribute access to the current request's Context."""
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_ctx_var.get(), name)
+
+
+ctx = _CtxProxy()
+
+
+def withctx(func):
+    """Decorator: populates ``leap.ctx`` with call metadata (student_id, trial, experiment)."""
+    func._leap_withctx = True
+    return func
+
+
 def _has_flag(func, flag: str) -> bool:
     return getattr(func, flag, False)
 
@@ -116,6 +144,9 @@ def execute_rpc(
     kwargs = kwargs or {}
     error_msg = None
     result = None
+
+    if _has_flag(func, "_leap_withctx"):
+        _ctx_var.set(Context(student_id=student_id, trial=trial, experiment=experiment.name))
 
     try:
         result = func(*args, **kwargs)
