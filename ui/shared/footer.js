@@ -37,7 +37,7 @@
     '<span class="footer-sep" id="ft-rediscover-sep" style="display:none">&middot;</span> ' +
     '<a href="#" class="footer-admin" id="ft-logout" style="display:none">Logout</a>' +
     '<span class="footer-sep" id="ft-logout-sep" style="display:none">&middot;</span> ' +
-    '<a href="https://github.com/neveisa/LEAP2" target="_blank" rel="noopener">GitHub</a>' +
+    '<a href="https://github.com/leaplive/LEAP2" target="_blank" rel="noopener">GitHub</a>' +
     "<br>" +
     '<span class="footer-meta">' +
     '<span class="footer-status"><span class="footer-dot offline" id="ft-dot"></span> <span id="ft-status">...</span></span>' +
