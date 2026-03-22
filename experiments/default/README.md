@@ -2,6 +2,9 @@
 name: default
 display_name: Default Lab
 description: Starter experiment demonstrating LEAP2 features — RPC, logging, decorators, and registration.
+author: "Sampad Mohanty"
+organization: "University of Southern California"
+tags: [starter, demo, RPC, decorators]
 version: "1.0.0"
 entry_point: dashboard.html
 leap_version: ">=1.0"

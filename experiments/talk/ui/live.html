@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Dashboard — LEAP2 Talk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #0c0d11;
+  --surface: #13151c;
+  --border:  #252837;
+  --accent:  #60a5fa;
+  --purple:  #a78bfa;
+  --green:   #34d399;
+  --amber:   #fbbf24;
+  --text:    #e2e8f0;
+  --muted:   #64748b;
+  --sans:    'DM Sans', sans-serif;
+  --serif:   'DM Serif Display', serif;
+  --mono:    'DM Mono', monospace;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+
+#app {
+  width: 100%; height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  position: relative;
+}
+
+/* — Bottom accent bar — */
+#app::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--purple) 60%, transparent 100%);
+  z-index: 20;
+}
+
+/* — Header — */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.2rem 2rem;
+}
+
+header h1 {
+  font-family: var(--serif);
+  font-size: 1.6rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.counter {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.counter-num {
+  font-size: 2rem;
+  font-weight: 500;
+  color: var(--green);
+  line-height: 1;
+}
+
+.live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.5s ease infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* — Canvas — */
+#chart-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2rem 2rem;
+}
+
+canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* — Point animation overlay — */
+.new-point-flash {
+  position: absolute;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+  animation: point-appear 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes point-appear {
+  0% { transform: scale(3); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+/* — Light theme — */
+[data-theme="light"] {
+  --bg:      #f8f9fb;
+  --surface: #ffffff;
+  --border:  #d1d5db;
+  --accent:  #2563eb;
+  --purple:  #7c3aed;
+  --green:   #059669;
+  --amber:   #d97706;
+  --text:    #1e293b;
+  --muted:   #64748b;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Live Starting Points</h1>
+    <div class="counter">
+      <div class="live-dot"></div>
+      <span><span class="counter-num" id="count">0</span> participants</span>
+    </div>
+  </header>
+  <div id="chart-wrap">
+    <canvas id="chart"></canvas>
+  </div>
+</div>
+
+<script type="module">
+import { LogClient } from "/static/logclient.js";
+
+// — Config —
+const RANGE = 50;
+const POLL_MS = 1500;
+
+// — Elements —
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
+const countEl = document.getElementById("count");
+const chartWrap = document.getElementById("chart-wrap");
+
+// — Log client —
+const logs = LogClient.fromCurrentPage();
+
+// — State —
+let points = [];          // [{x, y, id, isNew}]
+let knownIds = new Set();
+const dpr = window.devicePixelRatio || 1;
+
+// — Sizing —
+function resize() {
+  const rect = chartWrap.getBoundingClientRect();
+  const availH = rect.height - 8;
+  const availW = rect.width;
+  // Use available height if reasonable, otherwise fall back to width-based
+  const sz = availH > 100 ? Math.min(availW, availH) : availW * 0.7;
+  canvas.style.width = sz + "px";
+  canvas.style.height = sz + "px";
+  canvas.width = sz * dpr;
+  canvas.height = sz * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+// — Coordinate conversion —
+function coordToCanvas(x, y) {
+  const sz = parseFloat(canvas.style.width);
+  const margin = sz * 0.09;
+  const plot = sz - margin * 2;
+  return [
+    margin + ((x + RANGE) / (2 * RANGE)) * plot,
+    margin + ((-y + RANGE) / (2 * RANGE)) * plot,
+  ];
+}
+
+// — Objective function for contours —
+function f(x, y) {
+  const A = (x - 20) ** 2 + 10 * (y - 20) ** 2;
+  const B = 5 * (x + 20) ** 2 + (y + 20) ** 2;
+  return (A * B) / 100;
+}
+
+// — Theme-aware color helpers —
+function isLight() {
+  return document.documentElement.getAttribute("data-theme") === "light";
+}
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// — Drawing —
+function draw() {
+  const sz = parseFloat(canvas.style.width);
+  if (!sz) return;
+  const margin = sz * 0.09;
+  const plot = sz - margin * 2;
+  const light = isLight();
+
+  // Fill canvas background
+  ctx.fillStyle = cssVar("--bg");
+  ctx.fillRect(0, 0, sz, sz);
+
+  // Contour heatmap
+  drawContours(margin, plot, sz, light);
+
+  // Grid
+  ctx.strokeStyle = light ? "#00000010" : "#ffffff08";
+  ctx.lineWidth = 1;
+  const step = 10;
+  for (let v = -RANGE; v <= RANGE; v += step) {
+    const frac = (v + RANGE) / (2 * RANGE);
+    const gx = margin + frac * plot;
+    const gy = margin + (1 - frac) * plot;
+    ctx.beginPath(); ctx.moveTo(gx, margin); ctx.lineTo(gx, margin + plot); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(margin, gy); ctx.lineTo(margin + plot, gy); ctx.stroke();
+  }
+
+  // Axes
+  const [ax0, ay0] = coordToCanvas(0, 0);
+  ctx.strokeStyle = light ? "#00000025" : "#ffffff18";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(margin, ay0); ctx.lineTo(margin + plot, ay0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ax0, margin); ctx.lineTo(ax0, margin + plot); ctx.stroke();
+
+  // Axis labels
+  ctx.font = `500 ${Math.max(11, sz * 0.018)}px 'DM Mono', monospace`;
+  ctx.fillStyle = cssVar("--muted");
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let v = -40; v <= 40; v += 20) {
+    if (v === 0) continue;
+    const [lx] = coordToCanvas(v, 0);
+    ctx.fillText(v, lx, ay0 + 5);
+    const [, ly] = coordToCanvas(0, v);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(v, ax0 - 8, ly);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+  }
+
+  // Border
+  ctx.strokeStyle = cssVar("--border");
+  ctx.lineWidth = 1;
+  ctx.strokeRect(margin, margin, plot, plot);
+
+  // Points
+  const accentColor = cssVar("--accent");
+  const purpleColor = cssVar("--purple");
+  for (const pt of points) {
+    const [px, py] = coordToCanvas(pt.x, pt.y);
+    // Glow
+    const glow = ctx.createRadialGradient(px, py, 0, px, py, 14);
+    glow.addColorStop(0, accentColor + "59");
+    glow.addColorStop(1, accentColor + "00");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(px, py, 14, 0, Math.PI * 2);
+    ctx.fill();
+    // Dot
+    ctx.fillStyle = pt.isNew ? purpleColor : accentColor;
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.fill();
+    // Label
+    ctx.font = `400 ${Math.max(9, sz * 0.016)}px 'DM Mono', monospace`;
+    ctx.fillStyle = cssVar("--text");
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(pt.id, px + 7, py - 3);
+  }
+
+  // Title on empty state
+  if (points.length === 0) {
+    ctx.font = `300 ${Math.max(16, sz * 0.03)}px 'DM Sans', sans-serif`;
+    ctx.fillStyle = cssVar("--muted") + "60";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Waiting for participants...", sz / 2, sz / 2);
+  }
+}
+
+function drawContours(margin, plot, sz, light) {
+  const res = 3;
+  const imgW = Math.ceil(plot / res);
+  const imgH = Math.ceil(plot / res);
+  let maxVal = 0;
+  const vals = new Float32Array(imgW * imgH);
+  for (let j = 0; j < imgH; j++) {
+    for (let i = 0; i < imgW; i++) {
+      const x = (i / imgW) * 2 * RANGE - RANGE;
+      const y = -((j / imgH) * 2 * RANGE - RANGE);
+      const v = f(x, y);
+      vals[j * imgW + i] = v;
+      if (v > maxVal) maxVal = v;
+    }
+  }
+  const imageData = ctx.createImageData(imgW, imgH);
+  for (let j = 0; j < imgH; j++) {
+    for (let i = 0; i < imgW; i++) {
+      const idx = (j * imgW + i) * 4;
+      const v = vals[j * imgW + i];
+      const t = Math.log(1 + v) / Math.log(1 + maxVal);
+      if (light) {
+        // Warm blue-purple tint on white
+        imageData.data[idx]     = Math.floor(200 - t * 60);
+        imageData.data[idx + 1] = Math.floor(210 - t * 80);
+        imageData.data[idx + 2] = Math.floor(240 - t * 40);
+        imageData.data[idx + 3] = Math.floor(20 + t * 50);
+      } else {
+        imageData.data[idx]     = Math.floor(18 + t * 35);
+        imageData.data[idx + 1] = Math.floor(15 + t * 12);
+        imageData.data[idx + 2] = Math.floor(28 + t * 50);
+        imageData.data[idx + 3] = Math.floor(30 + t * 40);
+      }
+    }
+  }
+  const offscreen = new OffscreenCanvas(imgW, imgH);
+  const octx = offscreen.getContext("2d");
+  octx.putImageData(imageData, 0, 0);
+  ctx.drawImage(offscreen, margin, margin, plot, plot);
+}
+
+// — Polling —
+let lastLogId = null;
+
+async function poll() {
+  try {
+    const opts = { funcName: "pick_start", n: 10000, order: "earliest" };
+    if (lastLogId) opts.afterId = lastLogId;
+    const result = await logs.getLogs(opts);
+    const entries = result.logs || result;
+
+    if (entries.length > 0) {
+      lastLogId = entries[entries.length - 1].id;
+
+      // Mark all existing as not-new
+      for (const pt of points) pt.isNew = false;
+
+      for (const entry of entries) {
+        const id = entry.student_id;
+        if (knownIds.has(id)) {
+          // Update existing point
+          const existing = points.find(p => p.id === id);
+          if (existing && entry.result) {
+            existing.x = entry.result.x;
+            existing.y = entry.result.y;
+            existing.isNew = true;
+          }
+        } else {
+          knownIds.add(id);
+          if (entry.result) {
+            points.push({ x: entry.result.x, y: entry.result.y, id, isNew: true });
+          }
+        }
+      }
+
+      countEl.textContent = points.length;
+      draw();
+    }
+  } catch (err) {
+    console.error("Poll error:", err);
+  }
+}
+
+// — Theme: URL param + postMessage —
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get("theme") === "light") document.documentElement.setAttribute("data-theme", "light");
+  window.addEventListener("message", function(e) {
+    if (e.data && e.data.theme) {
+      if (e.data.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+      else document.documentElement.removeAttribute("data-theme");
+      draw();
+    }
+    if (e.data && e.data.polling !== undefined) {
+      e.data.polling ? startPolling() : stopPolling();
+    }
+  });
+})();
+
+// — Polling control —
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  poll();
+  pollTimer = setInterval(poll, POLL_MS);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+// — Init —
+window.addEventListener("resize", resize);
+resize();
+// Auto-start only when opened directly (not in an iframe)
+if (window.self === window.top) startPolling();
+</script>
+</body>
+</html>

@@ -2,6 +2,9 @@
 name: gradient-descent-2d
 display_name: Gradient Descent 2D
 description: Optimize a 2D function with two local minima using gradient descent.
+author: "Sampad Mohanty"
+organization: "University of Southern California"
+tags: [optimization, calculus, gradient-descent, numerical-methods]
 version: "1.0.0"
 entry_point: dashboard.html
 leap_version: ">=1.0"

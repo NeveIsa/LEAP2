@@ -29,6 +29,9 @@ DEFAULT_FRONTMATTER = {
     "version": "",
     "entry_point": ENTRY_POINT_README,
     "require_registration": True,
+    "author": "",
+    "organization": "",
+    "tags": [],
 }
 
 
@@ -180,6 +183,9 @@ class ExperimentInfo:
         self.require_registration = self.frontmatter.get("require_registration", True)
         self.leap_version = self.frontmatter.get("leap_version", "")
         self.pages = self.frontmatter.get("pages", [])
+        self.author = self.frontmatter.get("author", "")
+        self.organization = self.frontmatter.get("organization", "")
+        self.tags = self.frontmatter.get("tags", [])
 
         # Check leap_version requirement
         self.version_ok, self.version_message = check_leap_version(self.leap_version)
@@ -201,6 +207,9 @@ class ExperimentInfo:
         self.require_registration = self.frontmatter.get("require_registration", True)
         self.leap_version = self.frontmatter.get("leap_version", "")
         self.pages = self.frontmatter.get("pages", [])
+        self.author = self.frontmatter.get("author", "")
+        self.organization = self.frontmatter.get("organization", "")
+        self.tags = self.frontmatter.get("tags", [])
         self.version_ok, self.version_message = check_leap_version(self.leap_version)
         return self.frontmatter
 
@@ -223,6 +232,9 @@ class ExperimentInfo:
             "leap_version": self.leap_version,
             "leap_version_ok": self.version_ok,
             "pages": self.pages,
+            "author": self.author,
+            "organization": self.organization,
+            "tags": self.tags,
         }
 
 

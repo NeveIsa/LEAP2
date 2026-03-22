@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Pick Your Starting Point — LEAP2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #0c0d11;
+  --surface: #13151c;
+  --border:  #252837;
+  --accent:  #60a5fa;
+  --purple:  #a78bfa;
+  --green:   #34d399;
+  --amber:   #fbbf24;
+  --text:    #e2e8f0;
+  --muted:   #64748b;
+  --sans:    'DM Sans', sans-serif;
+  --serif:   'DM Serif Display', serif;
+  --mono:    'DM Mono', monospace;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* — Layout: full-bleed canvas with floating UI — */
+
+#app {
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+header {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 1.25rem 1.5rem 0;
+  pointer-events: none;
+  text-align: center;
+}
+
+header h1 {
+  font-family: var(--serif);
+  font-size: 1.45rem;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+header p {
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  font-weight: 300;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  transition: all 0.4s ease;
+}
+
+/* — Canvas fills the viewport — */
+
+#plane {
+  flex: 1;
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+/* — Floating status bar — */
+
+#status {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
+  text-align: center;
+  padding: 0 1.5rem 1.4rem;
+  pointer-events: none;
+}
+
+#status-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.55rem 1.1rem;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#status-inner.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#status-inner.success {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+}
+
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+  animation: pulse-dot 1.5s ease infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* — Bottom accent bar matching slides — */
+
+#app::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--purple) 60%, transparent 100%);
+  z-index: 20;
+}
+
+/* — Tap ripple effect — */
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  z-index: 5;
+  animation: ripple-expand 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes ripple-expand {
+  0% { width: 0; height: 0; opacity: 1; }
+  100% { width: 60px; height: 60px; opacity: 0; }
+}
+
+/* — Light theme — */
+[data-theme="light"] {
+  --bg:      #f8f9fb;
+  --surface: #ffffff;
+  --border:  #d1d5db;
+  --accent:  #2563eb;
+  --purple:  #7c3aed;
+  --green:   #059669;
+  --amber:   #d97706;
+  --text:    #1e293b;
+  --muted:   #64748b;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Pick Your Starting Point</h1>
+    <p id="subtitle">Tap anywhere on the plane</p>
+    <p id="user-id" style="font-family:var(--mono);font-size:0.85rem;color:var(--accent);margin-top:0.3rem;"></p>
+  </header>
+  <canvas id="plane"></canvas>
+  <div id="status">
+    <div id="status-inner">
+      <span class="status-dot"></span>
+      <span id="status-text"></span>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { RPCClient } from "/static/rpcclient.js";
+
+// — Config —
+const RANGE = 50;  // coordinate range: -50 to 50
+const studentId = Math.random().toString(36).slice(2, 8);
+document.getElementById("user-id").textContent = "You are: " + studentId;
+
+// — Elements —
+const canvas = document.getElementById("plane");
+const ctx = canvas.getContext("2d");
+const statusInner = document.getElementById("status-inner");
+const statusText = document.getElementById("status-text");
+const subtitle = document.getElementById("subtitle");
+
+// — RPC client —
+const rpc = RPCClient.fromCurrentPage({ studentId });
+
+// — State —
+let pickedPoint = null;   // {x, y, canvasX, canvasY}
+let sending = false;
+const dpr = window.devicePixelRatio || 1;
+
+// — Sizing —
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+// — Coordinate conversion —
+function canvasToCoord(cx, cy) {
+  const rect = canvas.getBoundingClientRect();
+  const size = Math.min(rect.width, rect.height) * 0.82;
+  const ox = rect.width / 2;
+  const oy = rect.height / 2;
+  const x = ((cx - ox) / (size / 2)) * RANGE;
+  const y = -((cy - oy) / (size / 2)) * RANGE;
+  return [
+    Math.round(x * 10) / 10,
+    Math.round(y * 10) / 10,
+  ];
+}
+
+function coordToCanvas(x, y) {
+  const rect = canvas.getBoundingClientRect();
+  const size = Math.min(rect.width, rect.height) * 0.82;
+  const ox = rect.width / 2;
+  const oy = rect.height / 2;
+  return [
+    ox + (x / RANGE) * (size / 2),
+    oy - (y / RANGE) * (size / 2),
+  ];
+}
+
+// — The objective function (for contour hints) —
+function f(x, y) {
+  const A = (x - 20) ** 2 + 10 * (y - 20) ** 2;
+  const B = 5 * (x + 20) ** 2 + (y + 20) ** 2;
+  return (A * B) / 100;
+}
+
+// — Theme-aware color helpers —
+function isLight() {
+  return document.documentElement.getAttribute("data-theme") === "light";
+}
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// — Drawing —
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width;
+  const h = rect.height;
+  const size = Math.min(w, h) * 0.82;
+  const ox = w / 2;
+  const oy = h / 2;
+  const half = size / 2;
+  const light = isLight();
+  const accentColor = cssVar("--accent");
+
+  // Fill canvas background
+  ctx.fillStyle = cssVar("--bg");
+  ctx.fillRect(0, 0, w, h);
+
+  // Subtle contour fill
+  drawContours(ox, oy, half, light);
+
+  // Grid lines
+  ctx.strokeStyle = light ? "#00000010" : "#ffffff08";
+  ctx.lineWidth = 1;
+  const step = 10;
+  for (let v = -RANGE; v <= RANGE; v += step) {
+    const frac = v / RANGE;
+    const gx = ox + frac * half;
+    ctx.beginPath();
+    ctx.moveTo(gx, oy - half);
+    ctx.lineTo(gx, oy + half);
+    ctx.stroke();
+    const gy = oy - frac * half;
+    ctx.beginPath();
+    ctx.moveTo(ox - half, gy);
+    ctx.lineTo(ox + half, gy);
+    ctx.stroke();
+  }
+
+  // Axes
+  ctx.strokeStyle = light ? "#00000025" : "#ffffff18";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(ox - half, oy);
+  ctx.lineTo(ox + half, oy);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ox, oy - half);
+  ctx.lineTo(ox, oy + half);
+  ctx.stroke();
+
+  // Axis labels
+  ctx.font = "500 11px 'DM Mono', monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = cssVar("--muted");
+  for (let v = -40; v <= 40; v += 20) {
+    if (v === 0) continue;
+    const lx = ox + (v / RANGE) * half;
+    ctx.fillText(v, lx, oy + 6);
+    const ly = oy - (v / RANGE) * half;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(v, ox - 8, ly);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+  }
+
+  // Axis name labels
+  ctx.font = "400 12px 'DM Sans', sans-serif";
+  ctx.fillStyle = cssVar("--muted") + "90";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText("x", ox + half + 14, oy - 5);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText("y", ox + 2, oy - half - 8);
+
+  // Border
+  ctx.strokeStyle = cssVar("--border");
+  ctx.lineWidth = 1;
+  ctx.strokeRect(ox - half, oy - half, size, size);
+
+  // Picked point
+  if (pickedPoint) {
+    const [px, py] = coordToCanvas(pickedPoint.x, pickedPoint.y);
+
+    // Crosshair lines
+    ctx.strokeStyle = accentColor + "40";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(px, oy - half);
+    ctx.lineTo(px, oy + half);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ox - half, py);
+    ctx.lineTo(ox + half, py);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Glow
+    const glow = ctx.createRadialGradient(px, py, 0, px, py, 20);
+    glow.addColorStop(0, accentColor + "4d");
+    glow.addColorStop(1, accentColor + "00");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(px, py, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dot
+    ctx.fillStyle = accentColor;
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ring
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(px, py, 9, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Coordinate label
+    ctx.font = "500 11px 'DM Mono', monospace";
+    ctx.fillStyle = cssVar("--text");
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`(${pickedPoint.x}, ${pickedPoint.y})`, px + 14, py - 4);
+  }
+}
+
+function drawContours(ox, oy, half, light) {
+  const res = 2;
+  const imgW = Math.ceil(half * 2 / res);
+  const imgH = Math.ceil(half * 2 / res);
+
+  let maxVal = 0;
+  const vals = new Float32Array(imgW * imgH);
+  for (let j = 0; j < imgH; j++) {
+    for (let i = 0; i < imgW; i++) {
+      const x = ((i / imgW) * 2 - 1) * RANGE;
+      const y = -((j / imgH) * 2 - 1) * RANGE;
+      const v = f(x, y);
+      vals[j * imgW + i] = v;
+      if (v > maxVal) maxVal = v;
+    }
+  }
+
+  const imageData = ctx.createImageData(imgW, imgH);
+  for (let j = 0; j < imgH; j++) {
+    for (let i = 0; i < imgW; i++) {
+      const idx = (j * imgW + i) * 4;
+      const v = vals[j * imgW + i];
+      const t = Math.log(1 + v) / Math.log(1 + maxVal);
+      if (light) {
+        imageData.data[idx]     = Math.floor(200 - t * 60);
+        imageData.data[idx + 1] = Math.floor(210 - t * 80);
+        imageData.data[idx + 2] = Math.floor(240 - t * 40);
+        imageData.data[idx + 3] = Math.floor(20 + t * 50);
+      } else {
+        imageData.data[idx]     = Math.floor(20 + t * 30);
+        imageData.data[idx + 1] = Math.floor(16 + t * 10);
+        imageData.data[idx + 2] = Math.floor(30 + t * 40);
+        imageData.data[idx + 3] = Math.floor(25 + t * 30);
+      }
+    }
+  }
+
+  const offscreen = new OffscreenCanvas(imgW, imgH);
+  const octx = offscreen.getContext("2d");
+  octx.putImageData(imageData, 0, 0);
+  ctx.drawImage(offscreen, ox - half, oy - half, half * 2, half * 2);
+}
+
+// — Interaction —
+
+async function handleTap(clientX, clientY) {
+  if (sending) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const cx = clientX - rect.left;
+  const cy = clientY - rect.top;
+  const [x, y] = canvasToCoord(cx, cy);
+
+  // Clamp to range
+  if (Math.abs(x) > RANGE || Math.abs(y) > RANGE) return;
+
+  pickedPoint = { x, y };
+  draw();
+  showRipple(clientX, clientY);
+
+  // Send to server
+  sending = true;
+  showStatus("Sending...", false);
+
+  try {
+    await rpc.pick_start(x, y);
+    showStatus(`(${x}, ${y}) recorded`, true);
+    subtitle.textContent = "Tap again to change your point";
+    subtitle.style.color = "var(--green)";
+  } catch (err) {
+    showStatus("Error — tap to retry", false);
+    console.error(err);
+  } finally {
+    sending = false;
+  }
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  handleTap(e.clientX, e.clientY);
+});
+
+function showRipple(clientX, clientY) {
+  const el = document.createElement("div");
+  el.className = "ripple";
+  el.style.left = (clientX - 30) + "px";
+  el.style.top = (clientY - 30) + "px";
+  document.getElementById("app").appendChild(el);
+  el.addEventListener("animationend", () => el.remove());
+}
+
+function showStatus(text, success) {
+  statusText.textContent = text;
+  statusInner.classList.add("visible");
+  statusInner.classList.toggle("success", success);
+}
+
+// — Theme: URL param + postMessage —
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get("theme") === "light") document.documentElement.setAttribute("data-theme", "light");
+  window.addEventListener("message", function(e) {
+    if (e.data && e.data.theme) {
+      if (e.data.theme === "light") document.documentElement.setAttribute("data-theme", "light");
+      else document.documentElement.removeAttribute("data-theme");
+      draw();
+    }
+  });
+})();
+
+// — Init —
+window.addEventListener("resize", resize);
+resize();
+</script>
+</body>
+</html>
