@@ -20,9 +20,9 @@ from slowapi.errors import RateLimitExceeded
 
 from leap import __version__
 from leap.api.deps import limiter
-from leap.config import get_root, ui_dir, SESSION_SECRET_KEY, DEFAULT_EXPERIMENT
+from leap.config import get_root, ui_dir, package_ui_dir, SESSION_SECRET_KEY, DEFAULT_EXPERIMENT
 from leap.core.auth import ensure_credentials
-from leap.core.experiment import discover_experiments, ENTRY_POINT_README
+from leap.core.experiment import discover_experiments, parse_frontmatter, ENTRY_POINT_README
 from leap.api import call, logs, admin, experiments
 from leap.core import storage
 
@@ -42,12 +42,11 @@ def create_app(root=None) -> FastAPI:
         app.state.experiments = exps
         logger.info("Loaded %d experiment(s): %s", len(exps), ", ".join(exps.keys()) or "(none)")
 
-        ui_root = ui_dir(resolved_root)
-
-        shared_dir = ui_root / "shared"
-        if shared_dir.is_dir():
-            app.mount("/static", StaticFiles(directory=str(shared_dir)), name="static-assets")
-            logger.info("Mounted /static -> %s", shared_dir)
+        pkg_ui = package_ui_dir()
+        pkg_shared = pkg_ui / "shared"
+        if pkg_shared.is_dir():
+            app.mount("/static", StaticFiles(directory=str(pkg_shared)), name="static-assets")
+            logger.info("Mounted /static -> %s", pkg_shared)
 
         for exp_name, exp_info in exps.items():
             if exp_info.ui_dir.is_dir():
@@ -55,7 +54,29 @@ def create_app(root=None) -> FastAPI:
                 app.mount(mount_path, StaticFiles(directory=str(exp_info.ui_dir)), name=f"ui-{exp_name}")
                 logger.info("Mounted %s -> %s", mount_path, exp_info.ui_dir)
 
-        app.state.ui_root = ui_root
+        # Serve project-level assets (icons, images, etc.)
+        assets_dir = resolved_root / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="project-assets")
+            logger.info("Mounted /assets -> %s", assets_dir)
+
+        # Read lab info from root README frontmatter
+        lab_info = {"name": "", "display_name": "", "icon": "", "description": "", "author": "", "organization": "", "tags": [], "repository": ""}
+        root_readme = resolved_root / "README.md"
+        if root_readme.is_file():
+            fm = parse_frontmatter(root_readme)
+            lab_info["name"] = fm.get("name", "")
+            lab_info["display_name"] = fm.get("display_name", "") or fm.get("name", "")
+            lab_info["icon"] = fm.get("icon", "")
+            lab_info["description"] = fm.get("description", "")
+            lab_info["author"] = fm.get("author", "")
+            lab_info["organization"] = fm.get("organization", "")
+            lab_info["tags"] = fm.get("tags", [])
+            lab_info["repository"] = fm.get("repository", "")
+        app.state.lab_info = lab_info
+
+        app.state.ui_root = ui_dir(resolved_root)
+        app.state.pkg_ui_root = pkg_ui
         yield
         storage.close_all_engines()
 
@@ -94,10 +115,12 @@ def create_app(root=None) -> FastAPI:
                 url = f"/exp/{DEFAULT_EXPERIMENT}/ui/{entry}"
             return RedirectResponse(url=url, status_code=307)
 
-        landing_file = getattr(request.app.state, "ui_root", Path()) / "landing" / "index.html"
-        if landing_file.is_file():
-            return FileResponse(str(landing_file), media_type="text/html")
-        return {"message": "LEAP2 is running. No landing page found at ui/landing/index.html."}
+        for ui_root in [getattr(request.app.state, "ui_root", Path()),
+                        getattr(request.app.state, "pkg_ui_root", Path())]:
+            landing_file = ui_root / "landing" / "index.html"
+            if landing_file.is_file():
+                return FileResponse(str(landing_file), media_type="text/html")
+        return {"message": "LEAP2 is running. No landing page found."}
 
     @app.get("/login", include_in_schema=False)
     async def login_page(request: Request):
@@ -113,9 +136,11 @@ def create_app(root=None) -> FastAPI:
             else:
                 msg = "Not found"
             return JSONResponse(status_code=404, content={"detail": msg})
-        page_404 = getattr(request.app.state, "ui_root", Path()) / "404.html"
-        if page_404.is_file():
-            return FileResponse(str(page_404), status_code=404, media_type="text/html")
+        for ui_root in [getattr(request.app.state, "ui_root", Path()),
+                        getattr(request.app.state, "pkg_ui_root", Path())]:
+            page_404 = ui_root / "404.html"
+            if page_404.is_file():
+                return FileResponse(str(page_404), status_code=404, media_type="text/html")
         return HTMLResponse("<h1>404 — Not Found</h1>", status_code=404)
 
     return app

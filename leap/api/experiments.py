@@ -58,9 +58,11 @@ async def health(request: Request):
             logger.exception("Health check failed for experiment '%s'", name)
             all_ok = False
             exp_status[name] = {"ok": False, "error": "db_unreachable"}
+    lab_info = getattr(request.app.state, "lab_info", {})
     return {
         "ok": all_ok,
         "version": __version__,
+        "lab": lab_info,
         "experiment_count": len(experiments),
         "experiments": exp_status,
     }

@@ -275,6 +275,7 @@ def delete_logs(
     session: Session,
     student_id: str | None = None,
     trial: str | None = None,
+    func_name: str | None = None,
 ) -> int:
     """Delete logs matching the given filters. Returns count of deleted rows."""
     conditions = []
@@ -282,6 +283,8 @@ def delete_logs(
         conditions.append(Log.student_id == student_id)
     if trial is not None:
         conditions.append(Log.trial == trial)
+    if func_name is not None:
+        conditions.append(Log.func_name == func_name)
     count_stmt = select(sa_func.count()).select_from(Log)
     del_stmt = delete(Log)
     for cond in conditions:

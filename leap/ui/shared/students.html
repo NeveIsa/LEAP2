@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Manage registered students for a LEAP2 experiment.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+  <title>Students — LEAP2</title>
+  <script>(function(){var t=localStorage.getItem("leap-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches))document.documentElement.classList.add("dark")})()</script>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme-toggle.js" defer></script>
+  <style>
+    /* ── Search bar ── */
+    .search-bar {
+      position: relative;
+      margin-bottom: 1rem;
+    }
+    .search-bar .search-icon {
+      position: absolute;
+      left: 0.625rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--color-text-muted);
+      pointer-events: none;
+      opacity: 0.5;
+    }
+    .search-bar input {
+      width: 100%;
+      padding: 0.5rem 0.75rem 0.5rem 2.25rem;
+      min-height: 2.5rem;
+      font-size: 0.875rem;
+      font-family: var(--font-sans);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      transition: border-color var(--transition), box-shadow var(--transition);
+      outline: none;
+    }
+    .search-bar input:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-light);
+    }
+    .search-bar input::placeholder {
+      color: var(--color-text-muted);
+      opacity: 0.6;
+    }
+    .search-bar .search-clear {
+      position: absolute;
+      right: 0.5rem;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      padding: 0.25rem;
+      border-radius: 3px;
+      display: none;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .search-bar .search-clear:hover { color: var(--color-text); }
+    .search-bar.has-query .search-clear { display: block; }
+
+    .search-status {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .search-status .count {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--color-text);
+    }
+
+    /* ── Pagination ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--color-border);
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .pagination-info {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
+    .pagination-info .range {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      color: var(--color-text);
+    }
+    .pagination-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .pagination-controls button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 2rem;
+      height: 2rem;
+      padding: 0 0.5rem;
+      font-size: 0.75rem;
+      font-family: var(--font-sans);
+      font-weight: 500;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text-muted);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .pagination-controls button:hover:not(:disabled) {
+      background: var(--color-bg);
+      color: var(--color-text);
+      border-color: rgba(var(--color-primary-rgb), 0.3);
+    }
+    .pagination-controls button.active {
+      background: var(--color-primary);
+      color: #fff;
+      border-color: var(--color-primary);
+    }
+    html.dark .pagination-controls button.active {
+      background: #1a6b5a;
+      border-color: #1a6b5a;
+      color: #fff;
+    }
+    .pagination-controls button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .pagination-controls .page-ellipsis {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      opacity: 0.5;
+      letter-spacing: 0.1em;
+    }
+
+    .page-size-select {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
+    .page-size-select select {
+      padding: 0.25rem 0.375rem;
+      font-size: 0.75rem;
+      font-family: var(--font-sans);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      outline: none;
+      cursor: pointer;
+    }
+    .page-size-select select:focus {
+      border-color: var(--color-primary);
+    }
+
+    /* ── Row animation ── */
+    .table tbody tr {
+      animation: fadeRow 0.15s ease both;
+    }
+    @keyframes fadeRow {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Highlight matched text ── */
+    mark {
+      background: rgba(var(--color-primary-rgb), 0.15);
+      color: inherit;
+      padding: 0 1px;
+      border-radius: 2px;
+    }
+    html.dark mark {
+      background: rgba(94, 234, 212, 0.18);
+    }
+
+    /* ── No results ── */
+    .no-results {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--color-text-muted);
+      font-size: 0.875rem;
+    }
+    .no-results code {
+      font-size: 0.8125rem;
+    }
+
+    @media (max-width: 480px) {
+      .pagination { justify-content: center; }
+      .pagination-info { width: 100%; text-align: center; }
+    }
+  </style>
+</head>
+<body data-page="students">
+  <a class="skip-to-content" href="#main">Skip to content</a>
+  <script src="/static/navbar.js"></script>
+
+  <main class="container" id="main">
+    <nav class="breadcrumb">
+      <a href="/">Experiments</a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="#" id="bc-exp-link">default</a>
+      <span class="breadcrumb-sep">/</span>
+      <span>Students</span>
+    </nav>
+
+    <div class="page-header">
+      <h1>Students</h1>
+      <p>Manage registered students for this experiment. Requires admin login.</p>
+    </div>
+
+    <div id="auth-gate" class="card auth-gate hidden" style="margin-bottom: 1.5rem; text-align: center;">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <h2>Admin login required</h2>
+      <p>You need to be logged in as an admin to view and manage students for this experiment.</p>
+      <button class="btn btn-primary" onclick="window.LEAP && window.LEAP.showLogin(function(){window.location.reload()})">Log in</button>
+    </div>
+
+    <div id="main-content">
+      <div id="error" class="alert alert-error hidden"></div>
+      <div id="success" class="alert alert-success hidden"></div>
+
+      <div class="add-form">
+        <div class="form-group">
+          <label class="form-label" for="add-id">Student ID</label>
+          <input class="input" id="add-id" placeholder="e.g. s001" style="width:160px">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="add-name">Name</label>
+          <input class="input" id="add-name" placeholder="e.g. Alice" style="width:180px">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="add-email">Email <span style="opacity:.5;font-weight:400">(optional)</span></label>
+          <input class="input" id="add-email" type="email" placeholder="e.g. alice@univ.edu" style="width:220px">
+        </div>
+        <div class="form-group">
+          <button class="btn btn-primary" id="add-btn">Add Student</button>
+        </div>
+      </div>
+
+      <details class="card bulk-import" id="bulk-import-section" style="margin-bottom:1.25rem;padding:0;">
+        <summary style="cursor:pointer;padding:1.125rem 1.25rem;font-size:0.875rem;font-weight:600;color:var(--color-text);user-select:none;">Bulk Import (CSV)</summary>
+        <div style="padding:0 1.25rem 1.25rem;">
+          <p style="font-size:0.75rem;color:var(--color-text-muted);margin:0.25rem 0 0.625rem;">
+            CSV must have a <code>student_id</code> column. <code>name</code> and <code>email</code> columns are optional.
+          </p>
+          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+            <input type="file" id="csv-file" accept=".csv" style="font-size:0.8125rem;">
+            <span style="font-size:0.75rem;color:var(--color-text-muted);">or paste below</span>
+          </div>
+          <textarea id="csv-paste" rows="4" placeholder="student_id,name,email&#10;s001,Alice Smith,alice@univ.edu&#10;s002,Bob Johnson," style="width:100%;font-family:var(--font-mono);font-size:0.8125rem;padding:0.5rem;border:1px solid var(--color-border);border-radius:var(--radius);background:var(--color-surface);color:var(--color-text);resize:vertical;"></textarea>
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+            <button class="btn" id="csv-preview-btn" style="font-size:0.8125rem;">Preview</button>
+            <button class="btn btn-primary" id="csv-import-btn" style="font-size:0.8125rem;" disabled>Import</button>
+          </div>
+          <div id="csv-preview" style="margin-top:0.5rem;font-size:0.8125rem;" class="hidden"></div>
+        </div>
+      </details>
+
+      <div class="search-bar" id="search-bar">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="search-input" placeholder="Search by student ID or name..." aria-label="Search students">
+        <button class="search-clear" id="search-clear" aria-label="Clear search">&times;</button>
+      </div>
+
+      <div id="search-status" class="search-status hidden"></div>
+
+      <div id="loading">Loading students...</div>
+
+      <div class="table-wrap">
+        <table class="table hidden" id="student-table">
+          <thead>
+            <tr><th>Student ID</th><th>Name</th><th>Email</th><th></th></tr>
+          </thead>
+          <tbody id="student-body"></tbody>
+        </table>
+      </div>
+
+      <div id="no-results" class="no-results hidden">
+        No students match <code id="no-results-query"></code>
+      </div>
+
+      <div id="pagination" class="pagination hidden">
+        <div class="pagination-info" id="pagination-info"></div>
+        <div class="pagination-controls" id="pagination-controls"></div>
+        <div class="page-size-select">
+          <label for="page-size">Per page</label>
+          <select id="page-size">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="empty" class="empty-state hidden">
+        <h2>No students registered</h2>
+        <p>Add students using the form above or via the CLI.</p>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/footer.js"></script>
+  <script type="module">
+    import { AdminClient } from "/static/adminclient.js";
+
+    const expName = window.LEAP_EXP || new URLSearchParams(window.location.search).get("exp") || "default";
+    var bcLink = document.getElementById("bc-exp-link");
+    if (bcLink) { bcLink.href = "/exp/" + expName + "/ui/dashboard.html"; bcLink.textContent = expName; }
+
+    const authGate = document.getElementById("auth-gate");
+    const mainContent = document.getElementById("main-content");
+
+    async function checkAuth() {
+      try {
+        const res = await fetch("/api/auth-status", { credentials: "same-origin" });
+        const data = await res.json();
+        return data.admin === true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    const isAdmin = await checkAuth();
+
+    if (!isAdmin) {
+      mainContent.classList.add("hidden");
+      authGate.classList.remove("hidden");
+    } else {
+      let admin;
+      const loadingEl = document.getElementById("loading");
+      const errorEl = document.getElementById("error");
+      const successEl = document.getElementById("success");
+      const tableEl = document.getElementById("student-table");
+      const bodyEl = document.getElementById("student-body");
+      const emptyEl = document.getElementById("empty");
+      const searchInput = document.getElementById("search-input");
+      const searchBar = document.getElementById("search-bar");
+      const searchClear = document.getElementById("search-clear");
+      const searchStatusEl = document.getElementById("search-status");
+      const noResultsEl = document.getElementById("no-results");
+      const noResultsQuery = document.getElementById("no-results-query");
+      const paginationEl = document.getElementById("pagination");
+      const paginationInfo = document.getElementById("pagination-info");
+      const paginationControls = document.getElementById("pagination-controls");
+      const pageSizeSelect = document.getElementById("page-size");
+
+      let allStudents = [];
+      let filtered = [];
+      let currentPage = 1;
+      let pageSize = 25;
+
+      try {
+        admin = new AdminClient({ experiment: expName });
+      } catch (e) {
+        loadingEl.classList.add("hidden");
+        errorEl.textContent = e.message;
+        errorEl.classList.remove("hidden");
+      }
+
+      function flash(el, msg) {
+        el.textContent = msg;
+        el.classList.remove("hidden");
+        setTimeout(function () { el.classList.add("hidden"); }, 4000);
+      }
+
+      function escapeHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function highlightMatch(text, query) {
+        if (!query) return escapeHtml(text);
+        const escaped = escapeHtml(text);
+        const q = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return escaped.replace(new RegExp("(" + q + ")", "gi"), "<mark>$1</mark>");
+      }
+
+      function applyFilter() {
+        const q = searchInput.value.trim().toLowerCase();
+        searchBar.classList.toggle("has-query", q.length > 0);
+
+        if (!q) {
+          filtered = allStudents;
+        } else {
+          filtered = allStudents.filter(function (s) {
+            return s.student_id.toLowerCase().includes(q) ||
+                   (s.name || "").toLowerCase().includes(q);
+          });
+        }
+
+        currentPage = 1;
+        renderTable();
+      }
+
+      function renderTable() {
+        const q = searchInput.value.trim();
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        bodyEl.innerHTML = "";
+
+        if (allStudents.length === 0) {
+          tableEl.classList.add("hidden");
+          paginationEl.classList.add("hidden");
+          searchStatusEl.classList.add("hidden");
+          noResultsEl.classList.add("hidden");
+          emptyEl.classList.remove("hidden");
+          return;
+        }
+
+        emptyEl.classList.add("hidden");
+
+        if (total === 0) {
+          tableEl.classList.add("hidden");
+          paginationEl.classList.add("hidden");
+          searchStatusEl.classList.add("hidden");
+          noResultsEl.classList.remove("hidden");
+          noResultsQuery.textContent = q;
+          return;
+        }
+
+        noResultsEl.classList.add("hidden");
+        tableEl.classList.remove("hidden");
+
+        // Status line
+        if (q) {
+          searchStatusEl.innerHTML =
+            '<span class="count">' + total + '</span> of ' + allStudents.length + ' student' +
+            (allStudents.length !== 1 ? 's' : '') + ' matching <code>' + escapeHtml(q) + '</code>';
+          searchStatusEl.classList.remove("hidden");
+        } else {
+          searchStatusEl.innerHTML = '<span class="count">' + total + '</span> student' + (total !== 1 ? 's' : '') + ' registered';
+          searchStatusEl.classList.remove("hidden");
+        }
+
+        // Slice for current page
+        const start = (currentPage - 1) * pageSize;
+        const end = Math.min(start + pageSize, total);
+        const page = filtered.slice(start, end);
+
+        page.forEach(function (s, i) {
+          const tr = document.createElement("tr");
+          tr.style.animationDelay = (i * 0.02) + "s";
+          tr.innerHTML =
+            "<td><code>" + highlightMatch(s.student_id, q) + "</code></td>" +
+            "<td>" + highlightMatch(s.name || "", q) + "</td>" +
+            "<td>" + escapeHtml(s.email || "") + "</td>" +
+            "<td></td>";
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "btn btn-sm btn-danger";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", async function () {
+            if (!confirm("Delete student " + s.student_id + " and all their logs?")) return;
+            try {
+              await admin.deleteStudent(s.student_id);
+              flash(successEl, "Deleted " + s.student_id);
+              loadStudents();
+            } catch (err) {
+              flash(errorEl, err.message);
+            }
+          });
+          tr.lastChild.appendChild(delBtn);
+          const delLogsBtn = document.createElement("button");
+          delLogsBtn.type = "button";
+          delLogsBtn.className = "btn btn-sm";
+          delLogsBtn.textContent = "Delete Logs";
+          delLogsBtn.style.marginLeft = "0.5rem";
+          delLogsBtn.addEventListener("click", async function () {
+            if (!confirm("Delete all logs for " + s.student_id + "? The student will remain registered.")) return;
+            try {
+              const res = await admin.deleteLogs(s.student_id);
+              flash(successEl, "Deleted " + res.deleted + " log(s) for " + s.student_id);
+            } catch (err) {
+              flash(errorEl, err.message);
+            }
+          });
+          tr.lastChild.appendChild(delLogsBtn);
+          bodyEl.appendChild(tr);
+        });
+
+        // Pagination
+        if (totalPages <= 1) {
+          paginationEl.classList.add("hidden");
+          return;
+        }
+
+        paginationEl.classList.remove("hidden");
+        paginationInfo.innerHTML =
+          'Showing <span class="range">' + (start + 1) + '–' + end + '</span> of ' + total;
+
+        paginationControls.innerHTML = "";
+
+        // Prev button
+        const prevBtn = document.createElement("button");
+        prevBtn.innerHTML = "&#8249;";
+        prevBtn.disabled = currentPage === 1;
+        prevBtn.setAttribute("aria-label", "Previous page");
+        prevBtn.addEventListener("click", function () { currentPage--; renderTable(); });
+        paginationControls.appendChild(prevBtn);
+
+        // Page buttons with ellipsis
+        const pages = buildPageNumbers(currentPage, totalPages);
+        pages.forEach(function (p) {
+          if (p === "...") {
+            const span = document.createElement("span");
+            span.className = "page-ellipsis";
+            span.textContent = "...";
+            paginationControls.appendChild(span);
+          } else {
+            const btn = document.createElement("button");
+            btn.textContent = p;
+            if (p === currentPage) btn.classList.add("active");
+            btn.addEventListener("click", function () { currentPage = p; renderTable(); });
+            paginationControls.appendChild(btn);
+          }
+        });
+
+        // Next button
+        const nextBtn = document.createElement("button");
+        nextBtn.innerHTML = "&#8250;";
+        nextBtn.disabled = currentPage === totalPages;
+        nextBtn.setAttribute("aria-label", "Next page");
+        nextBtn.addEventListener("click", function () { currentPage++; renderTable(); });
+        paginationControls.appendChild(nextBtn);
+      }
+
+      function buildPageNumbers(current, total) {
+        if (total <= 7) {
+          return Array.from({ length: total }, function (_, i) { return i + 1; });
+        }
+        const pages = [];
+        pages.push(1);
+        if (current > 3) pages.push("...");
+        const lo = Math.max(2, current - 1);
+        const hi = Math.min(total - 1, current + 1);
+        for (let i = lo; i <= hi; i++) pages.push(i);
+        if (current < total - 2) pages.push("...");
+        pages.push(total);
+        return pages;
+      }
+
+      async function loadStudents() {
+        if (!admin) return;
+        errorEl.classList.add("hidden");
+        try {
+          const data = await admin.listStudents();
+          loadingEl.classList.add("hidden");
+          allStudents = data.students || [];
+          applyFilter();
+        } catch (err) {
+          loadingEl.classList.add("hidden");
+          flash(errorEl, err.message);
+        }
+      }
+
+      // Search events
+      let debounceTimer;
+      searchInput.addEventListener("input", function () {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(applyFilter, 120);
+      });
+      searchClear.addEventListener("click", function () {
+        searchInput.value = "";
+        applyFilter();
+        searchInput.focus();
+      });
+      searchInput.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+          searchInput.value = "";
+          applyFilter();
+        }
+      });
+
+      // Page size
+      pageSizeSelect.addEventListener("change", function () {
+        pageSize = parseInt(this.value, 10);
+        currentPage = 1;
+        renderTable();
+      });
+
+      // Add student
+      document.getElementById("add-btn").addEventListener("click", async function () {
+        const sid = document.getElementById("add-id").value.trim();
+        const name = document.getElementById("add-name").value.trim();
+        const email = document.getElementById("add-email").value.trim();
+        if (!sid) { flash(errorEl, "Student ID is required"); return; }
+        try {
+          await admin.addStudent(sid, name || sid, email || undefined);
+          document.getElementById("add-id").value = "";
+          document.getElementById("add-name").value = "";
+          document.getElementById("add-email").value = "";
+          flash(successEl, "Added " + sid);
+          loadStudents();
+        } catch (err) {
+          flash(errorEl, err.message);
+        }
+      });
+
+      // ── Bulk Import ──
+      const csvFileInput = document.getElementById("csv-file");
+      const csvPaste = document.getElementById("csv-paste");
+      const csvPreviewBtn = document.getElementById("csv-preview-btn");
+      const csvImportBtn = document.getElementById("csv-import-btn");
+      const csvPreviewEl = document.getElementById("csv-preview");
+      let parsedStudents = [];
+
+      function parseCSV(text) {
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length === 0) return [];
+        const headers = lines[0].split(",").map(h => h.trim());
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+          const vals = [];
+          let cur = "", inQ = false;
+          for (const ch of lines[i]) {
+            if (ch === '"') { inQ = !inQ; }
+            else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ""; }
+            else { cur += ch; }
+          }
+          vals.push(cur.trim());
+          const row = {};
+          headers.forEach((h, j) => { row[h] = vals[j] || ""; });
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      async function getCSVText() {
+        const file = csvFileInput.files[0];
+        if (file) return await file.text();
+        return csvPaste.value;
+      }
+
+      csvPreviewBtn.addEventListener("click", async function () {
+        const text = await getCSVText();
+        if (!text.trim()) { flash(errorEl, "No CSV data — upload a file or paste text"); return; }
+        const rows = parseCSV(text);
+        if (rows.length === 0) { flash(errorEl, "No data rows found in CSV"); return; }
+        const headers = Object.keys(rows[0]);
+        if (!headers.includes("student_id")) { flash(errorEl, "CSV must have a 'student_id' column"); return; }
+        parsedStudents = rows.map(r => ({
+          student_id: r.student_id || "",
+          name: r.name || "",
+          email: r.email || undefined
+        })).filter(r => r.student_id);
+        let html = "<strong>" + parsedStudents.length + " student(s) to import:</strong><br>";
+        html += "<table class='table' style='font-size:0.75rem;margin-top:0.375rem'><thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead><tbody>";
+        parsedStudents.slice(0, 20).forEach(s => {
+          html += "<tr><td><code>" + escapeHtml(s.student_id) + "</code></td><td>" + escapeHtml(s.name || s.student_id) + "</td><td>" + escapeHtml(s.email || "") + "</td></tr>";
+        });
+        if (parsedStudents.length > 20) html += "<tr><td colspan='3' style='text-align:center;color:var(--color-text-muted)'>... and " + (parsedStudents.length - 20) + " more</td></tr>";
+        html += "</tbody></table>";
+        csvPreviewEl.innerHTML = html;
+        csvPreviewEl.classList.remove("hidden");
+        csvImportBtn.disabled = false;
+      });
+
+      csvImportBtn.addEventListener("click", async function () {
+        if (parsedStudents.length === 0) return;
+        csvImportBtn.disabled = true;
+        try {
+          const result = await admin.importStudents(parsedStudents);
+          const msg = "Added: " + (result.added || []).length +
+                      " | Skipped: " + (result.skipped || []).length +
+                      " (duplicates) | Errors: " + (result.errors || []).length;
+          flash(successEl, msg);
+          csvPreviewEl.classList.add("hidden");
+          csvPaste.value = "";
+          csvFileInput.value = "";
+          parsedStudents = [];
+          loadStudents();
+        } catch (err) {
+          flash(errorEl, err.message);
+          csvImportBtn.disabled = false;
+        }
+      });
+
+      csvFileInput.addEventListener("change", function () {
+        csvPreviewEl.classList.add("hidden");
+        csvImportBtn.disabled = true;
+        parsedStudents = [];
+      });
+
+      loadStudents();
+    }
+  </script>
+</body>
+</html>

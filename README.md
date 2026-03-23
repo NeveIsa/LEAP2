@@ -1,3 +1,13 @@
+---
+name: leap2
+type: lab
+display_name: LEAP2
+description: "Live Experiments for Active Pedagogy — an interactive learning platform."
+author: "Sampad Mohanty"
+organization: "University of Southern California"
+tags: [education, interactive, rpc, experiments]
+---
+
 <div align="center">
   <img src="./banner.svg" alt="LEAP2 Banner" width="800">
 </div>
@@ -20,7 +30,7 @@ LEAP2 is a clean-room reimplementation of LEAP, fixing tight coupling problems (
 - **Decoupled Visualizations** — JS + Python Log Clients abstract log queries; visualizations depend on the client interface, not raw API calls
 - **Rich Client** — Python RPCClient with `is_registered()`, `help()`, `fetch_logs()`, structured exception hierarchy (`RPCError`, `RPCNotRegisteredError`, etc.); matching JavaScript RPCClient for browser use
 - **Admin Client** — Browser-side student management, log deletion, and function reloading via `adminclient.js`
-- **Admin Log Management** — Delete individual log entries from the Logs page (admin only; with confirmation prompt)
+- **Admin Log Management** — Delete individual log entries or clear all logs for a trial from the Logs page (admin only; with confirmation prompt)
 - **Polished UI** — Glassmorphism navbar, dark/light themes, sparklines, inline counts, experiment version badges, grouped nav (experiment vs shared links), academic fonts for README/docs, syntax highlighting, floating TOC
 - **CLI + Web** — Same logic powers both the `leap` CLI and the FastAPI web API
 - **Filtered Log Queries** — Filter by student, function, trial, time range; cursor pagination
@@ -43,6 +53,35 @@ leap run
 ```
 
 Open http://localhost:9000 — the landing page lists available experiments.
+
+## Concepts
+
+LEAP organizes work into two levels: **labs** and **experiments**.
+
+- **Experiment** — A self-contained unit of interactive content. Each experiment lives in its own directory under `experiments/` and has its own Python functions, UI, database, and `README.md` with frontmatter (`type: experiment`). Experiments can have their own `requirements.txt` for dependencies. An experiment can exist standalone (its own git repo) or inside a lab.
+
+- **Lab** — A project root that contains one or more experiments. A lab has a root `README.md` with frontmatter (`type: lab`) that lists its experiments. Labs provide the shared infrastructure: config, admin credentials, and the LEAP server. Clone a lab, run `leap init`, and all experiments are ready.
+
+```
+my-lab/                      ← lab (type: lab)
+├── README.md                # Lab metadata + experiments list
+├── assets/                  # Static files served at /assets/ (icons, images)
+├── config/
+└── experiments/
+    ├── sorting-viz/         ← experiment (type: experiment)
+    │   ├── README.md
+    │   ├── funcs/
+    │   ├── ui/
+    │   └── requirements.txt
+    └── graph-search/        ← experiment (type: experiment)
+        ├── README.md
+        ├── funcs/
+        └── ui/
+```
+
+The `assets/` directory is optional. If present, its contents are served at `/assets/` — useful for lab icons, images, or other static files. For example, set `icon: /assets/icon.png` in the lab frontmatter to display a lab icon in the UI.
+
+Labs and experiments are both publishable to the [community registry](https://github.com/leaplive/registry) via `leap publish`. Distribution is git — labs are cloned, experiments are installed into labs with `leap add <url>`.
 
 ## Project Structure
 
@@ -79,7 +118,7 @@ LEAP2/
 │       ├── ui/              # optional; entry_point can be "readme" or a file in ui/
 │       └── db/              # DuckDB file (gitignored)
 ├── config/                  # admin_credentials.json (gitignored)
-├── tests/                   # pytest suite (524 tests)
+├── tests/                   # pytest suite (596 tests)
 └── pyproject.toml
 ```
 
@@ -116,11 +155,41 @@ The Log Client provides a stable interface (`getLogs`, `getLogOptions`, `getAllL
 
 ## Creating Experiments
 
+Initialize a **lab** (project root with `experiments/` and `config/`):
+
 ```bash
-leap new my-experiment
+leap init [--password] [--skip-password]
 ```
 
-This scaffolds `experiments/my-experiment/` with a README, stub function file, and dashboard. Edit `funcs/functions.py` to add your own:
+This creates `experiments/`, `config/`, `ui/`, sets root `README.md` to `type: lab`, and prompts for an admin password unless credentials already exist or you pass `--skip-password`. Labs are just `git clone` — clone any lab repo and you're ready to go.
+
+Add a **new experiment** (local scaffold or remote clone):
+
+```bash
+leap add my-experiment                          # scaffold a new local experiment
+leap add https://github.com/user/cool-lab.git   # clone from Git
+leap add https://github.com/user/cool-lab.git --name custom-name
+```
+
+The root README tracks experiments with their source:
+
+```yaml
+---
+name: my-lab
+type: lab
+experiments:
+  - name: my-experiment
+    source: local
+  - name: cool-lab
+    source: https://github.com/user/cool-lab.git
+---
+```
+
+`leap add` automatically updates this list. `leap doctor` detects mismatches between the list and the filesystem and prompts to resolve them (reinstall missing remote experiments, scaffold missing local ones, or remove stale entries).
+
+LEAP discovers experiments from `experiments/` under the [resolved project root](leap/config.py) (`LEAP_ROOT`, or the current directory when it contains `experiments/`).
+
+`leap add my-experiment` scaffolds `experiments/my-experiment/` with a README, stub function file, and dashboard. Edit `funcs/functions.py` to add your own:
 
 ```python
 def square(x: float) -> float:
@@ -157,14 +226,71 @@ def predict(model_id: str, x: float) -> float:
 
 Use `_` prefixed names for shared math, caching, file I/O, validation, or any logic you don't want students to call directly.
 
-Install experiments from Git:
+Each experiment must be self-contained — include its own `requirements.txt` with all Python dependencies it needs, independent of other experiments in the same lab. This ensures experiments can be installed, shared, and remixed individually. `leap add` and `leap init` automatically run `pip install -r requirements.txt` for each experiment.
+
+Remove an experiment with:
 
 ```bash
-leap install https://github.com/user/cool-lab.git
-leap install https://github.com/user/cool-lab.git --name custom-name
+leap remove my-experiment          # prompts for confirmation
+leap remove my-experiment --yes    # skip confirmation
 ```
 
-If the cloned experiment contains a `requirements.txt`, `leap install` will automatically run `pip install -r requirements.txt` to install its dependencies into the current environment.
+This deletes the experiment directory and removes its entry from the lab README.
+
+## Sharing & Distribution
+
+Distribution is git. LEAP never uploads anything — you push your code with git, and others pull it with git. LEAP provides management (installing experiments into a lab) and an optional discovery layer (the community registry).
+
+### Distributing your work
+
+**Experiments:** Push your experiment to GitHub/GitLab and share the URL. Others install it into their lab with `leap add <url>`. Ensure the experiment's `README.md` has frontmatter (`name`, `description`, `author`, `tags`) and include a `requirements.txt` for dependencies.
+
+**Labs:** Push your entire lab repo to GitHub/GitLab. Others clone it and set it up:
+
+```bash
+git clone <url> && cd <name> && leap init
+```
+
+`leap init` is idempotent — it skips what's already there and sets up what's missing: installs experiment dependencies (`requirements.txt`), reinstalls remote experiments that were gitignored, and sets the admin password. After init, run `leap run` to start the server.
+
+### Remixing experiments across labs
+
+You can pull experiments from other labs into yours in two ways:
+
+- **From a remote repo:** `leap add <url>` — if the experiment has its own git repo
+- **From a local directory:** clone the other lab, then `leap add ./other-lab/experiments/cool-viz` — works for any experiment, even ones without their own repo
+
+```bash
+git clone https://github.com/someone/their-lab
+leap add ./their-lab/experiments/cool-viz
+```
+
+The source must have a `README.md` with `type: experiment` frontmatter. The copy excludes the `.git/` directory and tracks the experiment as local in your lab's README.
+
+### Installing experiments
+
+```bash
+leap add <url>                   # clone a remote experiment into your lab
+leap add <path>                  # copy an experiment from a local directory
+leap add <name>                  # scaffold a new local experiment
+leap remove <name>               # remove an experiment
+```
+
+`leap add <url>` clones the experiment into `experiments/`, installs `requirements.txt` if present, tracks it in your lab's README, and adds it to `.gitignore` so the lab's git doesn't try to track the nested repo. Running `leap add <url>` again on an already-installed experiment prompts to pull updates. `leap remove` cleans up the `.gitignore` entry.
+
+`leap add <path>` copies an experiment from a local directory (e.g. from another cloned lab). The source must have a `README.md` with `type: experiment` in its frontmatter. The `.git/` directory is excluded from the copy.
+
+### Community registry (optional)
+
+The [leaplive registry](https://github.com/leaplive/registry) is a discovery layer — it helps people find experiments, but is not required for distribution. You can always share experiment URLs directly.
+
+```bash
+leap discover                    # browse the registry
+leap discover --tag optimization # filter by tag
+leap publish my-experiment       # submit your experiment to the registry for review
+```
+
+`leap publish` creates a GitHub issue in the registry repo for review. It does not upload or distribute your code — your experiment must already be pushed to a git host. It runs `leap doctor` first and blocks if there are errors. The `repository` field is required — publish looks for it in the experiment's README frontmatter, then falls back to `git remote origin` on the experiment or project root. If no repository is found anywhere, publish fails with an error. Requires the `gh` CLI; otherwise provides a manual submission link.
 
 ## Decorators
 
@@ -404,7 +530,7 @@ Requires an active admin session (cookie set by the login page). `fromCurrentPag
 
 - **Functions** — `/static/functions.html?exp=<name>` — Function cards with syntax-highlighted signatures, docstrings (serif font), and decorator badges (`@nolog`, `@noregcheck`, `@adminonly`, rate limit)
 - **Students** — `/static/students.html?exp=<name>` — Add, list, delete students with optional email field; search by ID/name, pagination, bulk CSV import with preview (admin required; shows auth gate when not logged in)
-- **Logs** — `/static/logs.html?exp=<name>` — Real-time log viewer with auto-refresh, sparkline visualization, student/function/trial filters; admin users see per-row delete buttons
+- **Logs** — `/static/logs.html?exp=<name>` — Real-time log viewer with auto-refresh, sparkline visualization, student/function/trial filters; admin users see per-row delete buttons and a "Clear Trial Logs" button when a trial is selected
 - **README** — `/static/readme.html?exp=<name>` — Rendered experiment README with academic fonts, syntax highlighting (highlight.js), line numbers, floating table of contents, and frontmatter banner
 
 Shared pages receive the experiment name via the `?exp=` query parameter. Links from experiment UIs and the landing page include this parameter automatically.
@@ -482,6 +608,7 @@ The DB stores raw JSON strings (`args_json`, `result_json` TEXT columns); the AP
 | `/exp/<name>/admin/students` | GET | Admin | List students |
 | `/exp/<name>/admin/delete-student` | POST | Admin | Delete student + their logs |
 | `/exp/<name>/admin/delete-log` | POST | Admin | Delete a single log entry |
+| `/exp/<name>/admin/delete-logs` | POST | Admin | Delete logs by student and/or trial |
 | `/exp/<name>/admin/reload` | POST | Admin | Reload metadata and functions from disk |
 | `/exp/<name>/admin/export-logs` | GET | Admin | Export all logs (JSON; `?format=jsonlines\|csv`) |
 
@@ -589,6 +716,12 @@ The `experiment` column is redundant within a single per-experiment DB but kept 
 - **Public**: `/call`, `/functions`, `/logs`, `/log-options`, `/is-registered`, landing, login, health
 - **Logs are public** — Anyone can query `/logs` (intentional for classroom visualizations); deleting logs requires admin
 
+**Invoking the Login Modal in Custom UIs:**
+Any page that includes `<script src="/static/footer.js"></script>` automatically gains access to the global admin modal interface. You can trigger it from any button by calling the exposed `LEAP` API:
+```html
+<button onclick="if(window.LEAP) window.LEAP.showLogin(() => window.location.reload())">Sign In</button>
+```
+
 Credentials use PBKDF2-SHA256 (240,000 iterations). First run: if no credentials exist, set via `leap set-password` or `ADMIN_PASSWORD` env. Sessions use `SESSION_SECRET_KEY` env (random per restart if not set).
 
 ## Registration
@@ -604,17 +737,22 @@ Credentials use PBKDF2-SHA256 (240,000 iterations). First run: if no credentials
 | Command | Purpose |
 |---|---|
 | `leap run` | Start the server (auto-bootstraps project structure on first run) |
-| `leap new <name>` | Create experiment scaffold |
-| `leap install <url>` | Clone experiment from Git; auto-installs `requirements.txt` if present |
+| `leap init` | Set up a lab — idempotent: creates structure, installs deps, reinstalls missing remote experiments |
+| `leap add <name>` | Create a new experiment scaffold |
+| `leap add <url>` | Clone experiment from Git; auto-installs `requirements.txt` if present |
+| `leap add <path>` | Copy experiment from a local directory (must have `type: experiment` frontmatter) |
+| `leap remove <name>` | Remove an experiment (deletes directory, updates README tracking) |
 | `leap list` | List experiments |
 | `leap validate <name>` | Validate experiment setup |
+| `leap discover [--tag]` | Browse experiments in the leaplive registry |
+| `leap publish <name>` | Publish an experiment to the leaplive registry |
 | `leap export <exp> [--format]` | Export logs to `<exp>.jsonl` or `<exp>.csv` |
 | `leap set-password` | Set admin password |
 | `leap add-student <exp> <id>` | Add a student |
 | `leap import-students <exp> <csv>` | Bulk-import students from CSV (see format below) |
 | `leap list-students <exp>` | List students |
 | `leap config` | Show resolved configuration |
-| `leap doctor` | Validate full setup (Python, packages, dirs, credentials) |
+| `leap doctor` | Validate full setup; interactively resolve experiment list mismatches |
 | `leap version` | Show version |
 
 ### Student CSV Format
@@ -654,7 +792,7 @@ The same format is accepted by the API (`POST /exp/<name>/admin/import-students`
 # Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (524 tests)
+# Run tests (561 tests)
 pytest tests/
 
 # Run with auto-reload
@@ -666,12 +804,9 @@ uvicorn leap.main:app --reload --port 9000
 ```
 tests/
 ├── conftest.py               # Shared fixtures (tmp_root, tmp_credentials)
-├── test_quizlab.py           # Quizlab: parsing, grading, get_all_scores (14 tests)
 ├── core/                     # storage, auth, experiment, rpc, withctx (212 tests)
 │   ├── test_withctx.py       # @withctx decorator + ctx proxy injection (10 tests)
 │   └── test_function_discovery.py  # Import filtering in function loading (4 tests)
-├── experiments/
-│   └── test_graph_search.py  # Graph loading, neighbors, get_graph, layouts (22 tests)
 ├── api/
 │   ├── test_api.py           # Full API integration (89 tests)
 │   ├── test_ui_serving.py    # Static mounts, landing, login (22 tests)
@@ -680,12 +815,85 @@ tests/
 │   ├── test_rpcclient.py     # RPCClient: call, dispatch, help, is_registered, fetch_logs, exceptions (42 tests)
 │   └── test_logclient.py     # Python LogClient (23 tests)
 └── cli/
-    ├── test_cli_phase2.py    # new, list, validate, config, doctor (51 tests)
-    ├── test_cli_phase3.py    # install, pip deps (19 tests)
-    └── test_cli_phase4.py    # export (14 tests)
+    ├── test_cli_phase2.py    # init, new, list, validate, config, doctor (83 tests)
+    ├── test_cli_phase3.py    # install, copy, gitignore, pip deps (41 tests)
+    ├── test_cli_phase4.py    # export (14 tests)
+    └── test_cli_phase5.py    # discover, publish (19 tests)
 ```
 
 All tests use isolated temp directories with per-test DuckDB instances. No shared state.
+
+### Testing experiments in your lab
+
+Experiment-specific tests live in the **lab repo**, not in LEAP2. Create a `tests/` directory in your lab root:
+
+```
+my-lab/
+├── experiments/
+│   ├── gradient-descent/
+│   │   └── funcs/
+│   │       └── optimize.py
+│   └── graph-search/
+│       └── funcs/
+│           └── graph.py
+└── tests/
+    ├── test_gradient_descent.py
+    └── test_graph_search.py
+```
+
+Since experiment names can contain hyphens (not valid Python identifiers), import the module manually:
+
+```python
+import importlib.util, sys
+from pathlib import Path
+
+_mod_path = Path(__file__).parent.parent / "experiments" / "graph-search" / "funcs" / "graph.py"
+_spec = importlib.util.spec_from_file_location("graph_funcs", _mod_path)
+mod = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = mod
+_spec.loader.exec_module(mod)
+
+def test_something():
+    assert mod.get_graph("grid-3x3")["start"] == "0,0"
+```
+
+Run with `pytest tests/` from the lab root. Install `pytest` in your lab's environment (`pip install pytest`).
+
+## Lab README Format
+
+The root `README.md` of a lab has YAML frontmatter:
+
+```markdown
+---
+name: starterlab
+type: lab
+display_name: LEAP Starter Lab
+description: Example experiments demonstrating LEAP2 features
+icon: /assets/icon.png
+author: Sampad Mohanty
+organization: University of Southern California
+repository: https://github.com/leaplive/starterlab
+tags:
+- leap
+- example
+experiments:
+- name: default
+- name: graph-search
+---
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | yes | Machine-readable lab identifier |
+| `type` | yes | Must be `lab` |
+| `display_name` | no | Human-readable name (shown in navbar badge and info modal) |
+| `description` | no | Short description |
+| `icon` | no | URL or local path (e.g. `/assets/icon.png`) — shown in navbar badge and info modal |
+| `author` | no | Lab creator |
+| `organization` | no | Institution or company |
+| `repository` | no | Git URL (used by `leap publish`) |
+| `tags` | no | List of tags (used by `leap discover`) |
+| `experiments` | no | List of `{name}` entries for experiments in the lab |
 
 ## Experiment README Format
 
@@ -749,10 +957,29 @@ Currently the README covers all of this in condensed form.
 - ~~**Quiz system**~~ — Implemented: `quizlab` experiment with markdown quizzes, server-side grading, `@nolog` private storage, admin scores page with CSV export
 - **Monaco/uPlot IDE dashboard** — Rich in-browser coding + plotting
 - **DB migrations** — Schema versioning for future LEAP2 changes
-- ~~**Experiment dependencies**~~ — Implemented: `leap install` auto-runs `pip install -r requirements.txt` if present in the cloned experiment
+- ~~**Experiment dependencies**~~ — Implemented: `leap add <url>` auto-runs `pip install -r requirements.txt` if present in the cloned experiment
 - **WebSocket real-time** — Push log updates to browser instead of polling
 - ~~**Admin Client extensions**~~ — Implemented: `changePassword` (`POST /api/admin/change-password`), `exportLogs` (`GET /admin/export-logs`)
 - ~~**`leap_version` enforcement**~~ — Implemented: parsed from frontmatter and checked at discovery; `leap validate` reports version mismatches
+
+## Citation
+
+If you use LEAP in your work, please cite:
+
+> Sumedh Karajagi, Sampad Bhusan Mohanty, and Bhaskar Krishnamachari. 2026. **LEAP -- Live Experiments for Active Pedagogy.** arXiv:2601.22534. DOI: [10.1145/3770761.3777313](https://doi.org/10.1145/3770761.3777313)
+
+```bibtex
+@misc{karajagi2026leapliveexperiments,
+      title={LEAP -- Live Experiments for Active Pedagogy},
+      author={Sumedh Karajagi and Sampad Bhusan Mohanty and Bhaskar Krishnamachari},
+      year={2026},
+      eprint={2601.22534},
+      archivePrefix={arXiv},
+      primaryClass={cs.HC},
+      doi={https://doi.org/10.1145/3770761.3777313},
+      url={https://arxiv.org/abs/2601.22534},
+}
+```
 
 ## License
 

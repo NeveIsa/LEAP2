@@ -6,25 +6,130 @@ import csv
 import io
 import json
 import logging
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+import requests
 import typer
+import yaml
 
 from leap import __version__
-from leap.config import get_root
+from leap.config import get_root, _is_lab_root
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(help="LEAP2 — Live Experiments for Active Pedagogy")
 
+REGISTRY_URL = "https://raw.githubusercontent.com/leaplive/registry/main/registry.yaml"
+REGISTRY_REPO = "leaplive/registry"
+
+# pip→import name mappings for dependency checking
+_IMPORT_MAP = {"pyyaml": "yaml", "pillow": "PIL", "scikit_learn": "sklearn"}
+
+
+def _slugify_dir(name: str) -> str:
+    """Derive a slug from a directory name."""
+    return re.sub(r"[^a-z0-9_-]+", "", re.sub(r"[\s.]+", "-", name.lower().strip())).strip("-") or "my-lab"
+
+
+def _display_name_from_slug(name: str) -> str:
+    """Convert a slug to a human-readable display name."""
+    return name.replace("-", " ").replace("_", " ").title()
+
+
+def _parse_tags(raw: str) -> list[str]:
+    """Parse a comma-separated tags string into a list."""
+    return [t.strip() for t in raw.split(",") if t.strip()] if raw else []
+
+
+def _shorten_repo_url(url: str) -> str:
+    """Strip scheme prefix and .git suffix for display."""
+    for prefix in ("https://", "git@"):
+        if url.startswith(prefix):
+            return url[len(prefix):].removesuffix(".git").replace(":", "/")
+    return url
+
+
+def _print_validation_results(results: list[dict]) -> bool:
+    """Print validation results with icons. Returns True if there were issues."""
+    has_issues = False
+    for r in results:
+        if r["status"] == "ok":
+            icon = "✓"
+        elif r["status"] == "warning":
+            icon = "!"
+            has_issues = True
+        else:
+            icon = "✗"
+            has_issues = True
+        typer.echo(f"  {icon} {r['check']}: {r['message']}")
+    return has_issues
+
+
+class LabDetectedError(Exception):
+    """Raised when a cloned repo is a lab, not an experiment."""
+
+    def __init__(self, name: str, url: str):
+        self.name = name
+        self.url = url
+
 
 def _resolve_root(root: Path | None) -> Path:
     return root or get_root()
+
+
+def _get_git_remote(path: Path) -> str:
+    """Return the git remote 'origin' URL for a path, or empty string."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _ensure_gitignore_entries(root: Path, entries: list[str]) -> list[str]:
+    """Add entries to .gitignore if not already present. Returns list of added entries."""
+    gitignore = root / ".gitignore"
+    if gitignore.is_file():
+        content = gitignore.read_text(encoding="utf-8")
+        lines = content.splitlines()
+    else:
+        content = ""
+        lines = []
+    added = [e for e in entries if e not in lines]
+    if not added:
+        return []
+    if content and not content.endswith("\n"):
+        content += "\n"
+    content += "\n".join(added) + "\n"
+    gitignore.write_text(content, encoding="utf-8")
+    return added
+
+
+def _add_gitignore_entry(root: Path, name: str) -> None:
+    """Add experiments/<name>/ to .gitignore if not already present."""
+    _ensure_gitignore_entries(root, [f"experiments/{name}/"])
+
+
+def _remove_gitignore_entry(root: Path, name: str) -> None:
+    """Remove experiments/<name>/ from .gitignore if present."""
+    gitignore = root / ".gitignore"
+    if not gitignore.is_file():
+        return
+    entry = f"experiments/{name}/"
+    lines = gitignore.read_text(encoding="utf-8").splitlines()
+    filtered = [line for line in lines if line != entry]
+    if len(filtered) != len(lines):
+        gitignore.write_text("\n".join(filtered) + "\n" if filtered else "", encoding="utf-8")
 
 
 # ── Shared functions (importable by API routes) ──
@@ -128,8 +233,6 @@ def init_project_fn(root: Path | None = None) -> dict[str, str]:
     dirs = [
         resolved / "experiments",
         resolved / "config",
-        resolved / "ui" / "shared",
-        resolved / "ui" / "landing",
     ]
     for d in dirs:
         rel = str(d.relative_to(resolved))
@@ -139,22 +242,361 @@ def init_project_fn(root: Path | None = None) -> dict[str, str]:
             d.mkdir(parents=True, exist_ok=True)
             results[rel] = "created"
 
-    templates = {
-        resolved / "ui" / "shared" / "theme.css": _template_theme_css,
-        resolved / "ui" / "landing" / "index.html": _template_landing_html,
-    }
-    for path, template_fn in templates.items():
-        rel = str(path.relative_to(resolved))
-        if path.is_file():
-            results[rel] = "exists"
-        else:
-            path.write_text(template_fn(), encoding="utf-8")
-            results[rel] = "created"
+    essential = [
+        "config/admin_credentials.json",
+        "experiments/*/db/",
+        "__pycache__/",
+        "*.pyc",
+        ".env",
+    ]
+    added = _ensure_gitignore_entries(resolved, essential)
+    if added:
+        gitignore = resolved / ".gitignore"
+        # Check if .gitignore existed before (has more lines than what we added)
+        lines = gitignore.read_text(encoding="utf-8").splitlines()
+        results[".gitignore"] = "updated" if len(lines) > len(added) else "created"
+    else:
+        results[".gitignore"] = "exists"
 
     return results
 
 
-def new_experiment_fn(name: str, root: Path | None = None) -> Path:
+def _prompt_lab_metadata(slug: str) -> dict[str, str | list[str]]:
+    """Prompt interactively for lab metadata. Returns dict of field values."""
+    typer.echo()
+    typer.echo("Configure your lab (you can change these later in README.md):")
+    typer.echo()
+
+    typer.echo("  A unique identifier for this lab (lowercase, hyphens).")
+    name = typer.prompt("  Name", default=slug).strip()
+    typer.echo()
+
+    typer.echo("  A human-readable name shown on the landing page.")
+    display_name = typer.prompt("  Display name (optional)", default="").strip()
+    typer.echo()
+
+    typer.echo("  A short description of what this lab contains.")
+    description = typer.prompt("  Description", default="").strip()
+    typer.echo()
+
+    typer.echo("  Who created this lab — shown on the landing page.")
+    author = typer.prompt("  Author (optional)", default="").strip()
+    typer.echo()
+
+    typer.echo("  Your university, company, or group.")
+    organization = typer.prompt("  Organization (optional)", default="").strip()
+    typer.echo()
+
+    typer.echo("  Keywords to help others discover this lab, e.g. algorithms, intro-cs.")
+    tags = _parse_tags(typer.prompt("  Tags (comma-separated, optional)", default="").strip())
+
+    return {
+        "name": name or slug,
+        "display_name": display_name,
+        "description": description,
+        "author": author,
+        "organization": organization,
+        "tags": tags,
+    }
+
+
+def _ensure_lab_root_readme(cwd: Path, meta: dict | None = None) -> str:
+    """Ensure root README has ``type: lab``. Returns a short status: created|updated|skipped."""
+    from leap.core.experiment import parse_frontmatter, validate_experiment_name, update_frontmatter_field
+
+    readme = cwd / "README.md"
+    slug = _slugify_dir(cwd.name)
+    if not validate_experiment_name(slug):
+        slug = "my-lab"
+
+    if not readme.is_file():
+        m = meta or {"name": slug, "display_name": "", "description": "", "author": "", "organization": "", "tags": []}
+        tags_yaml = f" [{', '.join(m['tags'])}]" if m.get("tags") else " []"
+        author_line = f"author: {m['author']}\n" if m.get("author") else ""
+        org_line = f"organization: {m['organization']}\n" if m.get("organization") else ""
+        readme.write_text(
+            f"---\nname: {m['name']}\ntype: lab\n"
+            f"display_name: \"{m['display_name']}\"\n"
+            f"description: \"{m['description']}\"\n"
+            f"{author_line}"
+            f"{org_line}"
+            f"tags:{tags_yaml}\n"
+            f"experiments: []\n---\n\n"
+            f"# {m.get('display_name') or cwd.name}\n\n"
+            "LEAP project root. Add experiments under `experiments/`.\n",
+            encoding="utf-8",
+        )
+        return "created"
+
+    fm = parse_frontmatter(readme)
+    rt = str(fm.get("type", "") or "")
+    if rt == "lab":
+        return "skipped"
+
+    text = readme.read_text(encoding="utf-8")
+    if text.startswith("---"):
+        if update_frontmatter_field(readme, "type", "lab"):
+            if not fm.get("name"):
+                update_frontmatter_field(readme, "name", slug)
+            return "updated"
+        end = text.find("---", 3)
+        body = text[end + 3 :].lstrip("\n") if end != -1 else text
+        readme.write_text(
+            f"---\nname: {slug}\ntype: lab\ndisplay_name: \"\"\ndescription: \"\"\n---\n\n{body}",
+            encoding="utf-8",
+        )
+        return "updated"
+
+    readme.write_text(
+        f"---\nname: {slug}\ntype: lab\ndisplay_name: \"\"\ndescription: \"\"\n---\n\n{text}",
+        encoding="utf-8",
+    )
+    return "updated"
+
+
+def _install_experiment_deps(root: Path) -> list[str]:
+    """Install requirements.txt for all experiments that have one. Returns list of experiment names."""
+    exp_dir = root / "experiments"
+    if not exp_dir.is_dir():
+        return []
+
+    installed = []
+    for child in sorted(exp_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        req_file = child / "requirements.txt"
+        if req_file.is_file():
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                installed.append(child.name)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                logger.warning("pip install failed for %s: %s", child.name, e)
+    return installed
+
+
+def _reinstall_missing_remote_experiments(root: Path) -> list[str]:
+    """Reinstall remote experiments listed in README but missing from disk. Returns names reinstalled."""
+    from leap.core.experiment import get_experiment_list, validate_experiment_name
+
+    readme = root / "README.md"
+    exp_dir = root / "experiments"
+    if not readme.is_file() or not exp_dir.is_dir():
+        return []
+
+    listed_entries = get_experiment_list(readme)
+    on_disk = {c.name for c in exp_dir.iterdir() if c.is_dir() and validate_experiment_name(c.name)}
+    entries_by_name = {e["name"]: e for e in listed_entries if isinstance(e, dict) and "name" in e}
+
+    reinstalled = []
+    for name, entry in sorted(entries_by_name.items()):
+        if name in on_disk:
+            continue
+        source = entry.get("source", "")
+        if not source:
+            continue
+        if typer.confirm(f"Experiment '{name}' missing (from {source}). Reinstall?", default=True):
+            try:
+                install_experiment_fn(source, name=name, root=root)
+                reinstalled.append(name)
+            except Exception as e:
+                logger.warning("Failed to reinstall %s: %s", name, e)
+    return reinstalled
+
+
+def init_fn(
+    *,
+    force_password: bool = False,
+    skip_password: bool = False,
+    interactive: bool = True,
+) -> dict[str, str]:
+    """Initialize or set up the current directory as a LEAP lab root.
+
+    Idempotent — safe to run on both new and cloned labs. Creates directories
+    and README if missing, installs experiment dependencies, reinstalls missing
+    remote experiments, and sets admin password.
+    """
+    from leap.config import credentials_path
+    from leap.core.experiment import validate_experiment_name
+
+    cwd = Path.cwd().resolve()
+
+    if cwd.parent.name == "experiments" and validate_experiment_name(cwd.name):
+        raise typer.BadParameter(
+            "Run `leap init` from the project root, not from inside `experiments/<name>`."
+        )
+
+    results: dict[str, str] = dict(init_project_fn(cwd))
+
+    # Prompt for lab metadata if README doesn't exist yet
+    readme = cwd / "README.md"
+    meta = None
+    if not readme.is_file() and interactive and sys.stdin.isatty():
+        meta = _prompt_lab_metadata(_slugify_dir(cwd.name))
+
+    readme_status = _ensure_lab_root_readme(cwd, meta=meta)
+    results["readme"] = readme_status
+
+    from leap.core.experiment import parse_frontmatter, update_frontmatter_field
+    if readme.is_file():
+        fm = parse_frontmatter(readme)
+
+        # Populate missing optional fields interactively
+        if interactive and sys.stdin.isatty() and meta is None:
+            optional_fields = {
+                "display_name": ("Display name", "A human-readable name shown on the landing page."),
+                "description": ("Description", "A short description of what this lab contains."),
+                "author": ("Author", "Who created this lab — shown on the landing page."),
+                "organization": ("Organization", "Your university, company, or group."),
+                "tags": ("Tags (comma-separated)", "Keywords to help others discover this lab."),
+            }
+            updated = False
+            for field, (label, hint) in optional_fields.items():
+                if not fm.get(field):
+                    typer.echo(f"\n  {hint}")
+                    if field == "tags":
+                        value = _parse_tags(typer.prompt(f"  {label} (optional)", default="").strip())
+                    else:
+                        value = typer.prompt(f"  {label} (optional)", default="").strip()
+                    if value:
+                        update_frontmatter_field(readme, field, value)
+                        updated = True
+            if updated:
+                fm = parse_frontmatter(readme)
+                results["readme"] = "updated"
+
+        # Populate repository field from git remote if missing
+        if not fm.get("repository", ""):
+            remote = _get_git_remote(cwd)
+            if remote:
+                update_frontmatter_field(readme, "repository", remote)
+                results["repository"] = remote
+
+    synced = _sync_experiments_list(cwd)
+    if synced:
+        results["experiments_synced"] = str(synced)
+
+    deps_installed = _install_experiment_deps(cwd)
+    if deps_installed:
+        results["deps_installed"] = ", ".join(deps_installed)
+
+    reinstalled = _reinstall_missing_remote_experiments(cwd)
+    if reinstalled:
+        results["experiments_reinstalled"] = ", ".join(reinstalled)
+
+    cred_path = credentials_path(cwd)
+    if skip_password:
+        results["password"] = "skipped"
+    elif cred_path.is_file() and not force_password:
+        results["password"] = "exists"
+    else:
+        set_password_fn(cwd)
+        results["password"] = "set"
+
+    return results
+
+
+def _sync_experiments_list(root: Path) -> int:
+    """Scan experiments/ and populate the README experiments list. Returns count added."""
+    from leap.core.experiment import add_experiment_entry, validate_experiment_name
+
+    readme = root / "README.md"
+    if not readme.is_file():
+        return 0
+
+    exp_dir = root / "experiments"
+    if not exp_dir.is_dir():
+        return 0
+
+    count = 0
+    for child in sorted(exp_dir.iterdir()):
+        if not child.is_dir() or not validate_experiment_name(child.name):
+            continue
+        source = _get_git_remote(child) if (child / ".git").is_dir() else ""
+        if add_experiment_entry(readme, child.name, source):
+            count += 1
+    return count
+
+
+def _prompt_experiment_metadata(name: str, interactive: bool = True) -> dict:
+    """Prompt for experiment metadata. Returns a dict of frontmatter fields."""
+    default_display = _display_name_from_slug(name)
+
+    if not interactive:
+        return {
+            "display_name": default_display,
+            "description": "",
+            "author": "",
+            "organization": "",
+            "tags": [],
+            "require_registration": True,
+            "entry_point": "dashboard.html",
+        }
+
+    typer.echo()
+    typer.echo("Configure your experiment (you can change these later in README.md):")
+    typer.echo()
+
+    typer.echo("  The display name is shown on the landing page and experiment navbar.")
+    display_name = typer.prompt("  Display name", default=default_display).strip()
+    typer.echo()
+
+    typer.echo("  A short description of what students will do in this experiment.")
+    description = typer.prompt("  Description").strip()
+    typer.echo()
+
+    typer.echo("  Who created this experiment — shown on the landing page.")
+    author = typer.prompt("  Author").strip()
+    typer.echo()
+
+    typer.echo("  Your university, company, or group (optional).")
+    organization = typer.prompt("  Organization", default="").strip()
+    typer.echo()
+
+    typer.echo("  Keywords to help others find this experiment, e.g. algorithms, graphs, BFS.")
+    tags = _parse_tags(typer.prompt("  Tags (comma-separated)", default="").strip())
+    typer.echo()
+
+    typer.echo("  If yes, students must register with an ID before calling functions.")
+    typer.echo("  Set to no for open experiments where anyone can participate.")
+    require_reg = typer.confirm("  Require student registration?", default=True)
+    typer.echo()
+
+    typer.echo("  The HTML file loaded when a student opens this experiment.")
+    typer.echo("  Use 'readme' to show the README as the default page instead.")
+    entry_point = typer.prompt("  Entry point", default="dashboard.html").strip()
+
+    meta = {
+        "display_name": display_name,
+        "description": description,
+        "author": author,
+        "organization": organization,
+        "tags": tags,
+        "require_registration": require_reg,
+        "entry_point": entry_point,
+    }
+
+    typer.echo()
+    typer.echo("  Experiment metadata:")
+    typer.echo(f"    Name:          {name}")
+    typer.echo(f"    Display name:  {meta['display_name']}")
+    typer.echo(f"    Description:   {meta['description']}")
+    typer.echo(f"    Author:        {meta['author']}")
+    typer.echo(f"    Organization:  {meta['organization'] or '(none)'}")
+    typer.echo(f"    Tags:          {', '.join(meta['tags']) if meta['tags'] else '(none)'}")
+    typer.echo(f"    Registration:  {'required' if meta['require_registration'] else 'not required'}")
+    typer.echo(f"    Entry point:   {meta['entry_point']}")
+    typer.echo()
+    typer.echo("  You can change any of these later in the experiment's README.md.")
+
+    return meta
+
+
+def new_experiment_fn(name: str, root: Path | None = None, interactive: bool = True) -> Path:
     """Scaffold a new experiment. Returns the experiment path."""
     from leap.core.experiment import validate_experiment_name
 
@@ -169,16 +611,32 @@ def new_experiment_fn(name: str, root: Path | None = None) -> Path:
     if exp_path.exists():
         raise typer.BadParameter(f"Experiment '{name}' already exists at {exp_path}")
 
+    meta = _prompt_experiment_metadata(name, interactive=interactive)
+    remote_url = _get_git_remote(resolved)
+
     exp_path.mkdir(parents=True)
     (exp_path / "funcs").mkdir()
     (exp_path / "ui").mkdir()
     (exp_path / "db").mkdir()
 
+    tags_yaml = f" [{', '.join(meta['tags'])}]" if meta["tags"] else " []"
     readme = exp_path / "README.md"
     readme.write_text(
-        f"---\nname: {name}\ndisplay_name: {name.replace('-', ' ').replace('_', ' ').title()}\n"
-        f"description: \"\"\nentry_point: readme\nrequire_registration: true\n---\n\n"
-        f"# {name.replace('-', ' ').replace('_', ' ').title()}\n\nExperiment instructions go here.\n",
+        f"---\nname: {name}\ntype: experiment\ndisplay_name: {meta['display_name']}\n"
+        f"description: \"{meta['description']}\"\n"
+        f"author: \"{meta['author']}\"\n"
+        f"organization: \"{meta['organization']}\"\n"
+        f"tags:{tags_yaml}\n"
+        f"repository: \"{remote_url}\"\n"
+        f"entry_point: {meta['entry_point']}\n"
+        f"require_registration: {'true' if meta['require_registration'] else 'false'}\n"
+        f"---\n\n"
+        f"# {meta['display_name']}\n\nExperiment instructions go here.\n",
+        encoding="utf-8",
+    )
+
+    (exp_path / "requirements.txt").write_text(
+        "# Add experiment dependencies here, one per line.\n",
         encoding="utf-8",
     )
 
@@ -192,7 +650,7 @@ def new_experiment_fn(name: str, root: Path | None = None) -> Path:
     )
 
     stub_ui = exp_path / "ui" / "dashboard.html"
-    display = name.replace('-', ' ').replace('_', ' ').title()
+    display = _display_name_from_slug(name)
     stub_ui.write_text(
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
         "  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
@@ -213,6 +671,12 @@ def new_experiment_fn(name: str, root: Path | None = None) -> Path:
         "</body>\n</html>\n",
         encoding="utf-8",
     )
+
+    # Track in root README
+    root_readme = resolved / "README.md"
+    if root_readme.is_file():
+        from leap.core.experiment import add_experiment_entry
+        add_experiment_entry(root_readme, name, source="")
 
     return exp_path
 
@@ -260,10 +724,10 @@ def validate_experiment_fn(name: str, root: Path | None = None) -> list[dict]:
     results.append({"check": "directory", "status": "ok", "message": str(exp_path)})
 
     readme_path = exp_path / "README.md"
+    fm = parse_frontmatter(readme_path) if readme_path.is_file() else {}
     if not readme_path.is_file():
         results.append({"check": "readme", "status": "warning", "message": "README.md missing"})
     else:
-        fm = parse_frontmatter(readme_path)
         results.append({"check": "readme", "status": "ok", "message": f"Frontmatter parsed: {list(fm.keys())}"})
 
     funcs_dir = exp_path / "funcs"
@@ -275,9 +739,6 @@ def validate_experiment_fn(name: str, root: Path | None = None) -> list[dict]:
             results.append({"check": "funcs", "status": "ok", "message": f"{len(funcs)} function(s) loaded"})
         else:
             results.append({"check": "funcs", "status": "warning", "message": "No functions found"})
-
-    # leap_version check
-    fm = parse_frontmatter(readme_path) if readme_path.is_file() else {}
     leap_ver = fm.get("leap_version", "")
     if leap_ver:
         ok, msg = check_leap_version(leap_ver)
@@ -332,49 +793,288 @@ def show_config_fn(root: Path | None = None) -> dict:
     }
 
 
+def _doctor_hint(check: str, status: str) -> str:
+    """Actionable fix text for doctor rows; empty when status is ok."""
+    if status == "ok":
+        return ""
+    if check == "python":
+        return "Install Python 3.10+, then reinstall LEAP2 (`pip install -e .`)."
+    if check == "root":
+        return "cd into the lab directory or set LEAP_ROOT to the project root."
+    if check == "root_readme":
+        return (
+            "Edit root README.md frontmatter (`type: lab`), or run "
+            "`leap init` in the project root."
+        )
+    if check == "experiments_dir":
+        return "Run `leap run` once (bootstraps dirs) or create `experiments/` manually."
+    if check == "experiments":
+        return "`leap add <name>`."
+    if check.startswith("experiment:"):
+        exp_name = check.split(":", 1)[1]
+        return (
+            f"Edit `experiments/{exp_name}/README.md` — set `type: experiment` in frontmatter."
+        )
+    if check == "experiments_list":
+        return "Run `leap doctor` to interactively resolve experiment list mismatches."
+    if check == "credentials":
+        return "`leap set-password` (or set `ADMIN_PASSWORD` for non-interactive setup)."
+    if check.startswith("deps:"):
+        exp_name = check.split(":", 1)[1]
+        return f"`pip install -r experiments/{exp_name}/requirements.txt` or `leap init`."
+    if check.startswith("package:"):
+        pkg = check.split(":", 1)[1]
+        return f"`pip install -e .` in the lab root, or `pip install {pkg}`."
+    return ""
+
+
+def _doctor_row(check: str, status: str, message: str) -> dict:
+    return {
+        "check": check,
+        "status": status,
+        "message": message,
+        "hint": _doctor_hint(check, status),
+    }
+
+
 def doctor_fn(root: Path | None = None) -> list[dict]:
-    """Validate overall LEAP2 setup. Returns list of {check, status, message}."""
+    """Validate overall LEAP2 setup.
+
+    Returns list of dicts with keys: check, status, message, hint.
+    ``hint`` is empty when status is ok; otherwise suggests commands or edits.
+    """
     from leap.config import experiments_dir, credentials_path
+    from leap.core.experiment import parse_frontmatter, validate_experiment_name, get_experiment_list
 
     resolved = _resolve_root(root)
     results: list[dict] = []
 
     v = sys.version_info
     if v >= (3, 10):
-        results.append({"check": "python", "status": "ok", "message": f"Python {v.major}.{v.minor}.{v.micro}"})
+        results.append(_doctor_row("python", "ok", f"Python {v.major}.{v.minor}.{v.micro}"))
     else:
-        results.append({"check": "python", "status": "error", "message": f"Python {v.major}.{v.minor} < 3.10"})
+        results.append(_doctor_row("python", "error", f"Python {v.major}.{v.minor} < 3.10"))
 
+    reason = getattr(get_root, "reason", "")
     if resolved.is_dir():
-        results.append({"check": "root", "status": "ok", "message": str(resolved)})
+        results.append(_doctor_row("root", "ok", f"{resolved} ({reason})"))
     else:
-        results.append({"check": "root", "status": "error", "message": f"Not found: {resolved}"})
+        results.append(_doctor_row("root", "error", f"Not found: {resolved}"))
+
+    # Root README and type detection
+    root_readme = resolved / "README.md"
+    if root_readme.is_file():
+        fm = parse_frontmatter(root_readme)
+        root_type = fm.get("type", "")
+        root_name = fm.get("name", "")
+        if root_type == "lab":
+            results.append(
+                _doctor_row("root_readme", "ok", f"type: lab, name: {root_name or '(unnamed)'}")
+            )
+        elif root_type == "experiment":
+            results.append(
+                _doctor_row(
+                    "root_readme",
+                    "warning",
+                    "Root README has type: experiment — use type: lab for a project root",
+                )
+            )
+        elif root_type:
+            results.append(
+                _doctor_row(
+                    "root_readme",
+                    "warning",
+                    f"Unknown type: {root_type} — expected 'lab' for a project root",
+                )
+            )
+        else:
+            has_frontmatter = root_readme.read_text(encoding="utf-8").startswith("---")
+            if has_frontmatter:
+                results.append(
+                    _doctor_row(
+                        "root_readme",
+                        "warning",
+                        "Has frontmatter but missing 'type' field — add type: lab or run `leap init`",
+                    )
+                )
+            else:
+                results.append(
+                    _doctor_row(
+                        "root_readme",
+                        "warning",
+                        "No YAML frontmatter found — add type: lab or run `leap init`",
+                    )
+                )
+    else:
+        results.append(
+            _doctor_row(
+                "root_readme",
+                "warning",
+                "No README.md — run `leap init` or add README.md with `type: lab`",
+            )
+        )
+
+    # Check repository field in root README
+    if root_readme.is_file():
+        repo = fm.get("repository", "")
+        if repo:
+            results.append(_doctor_row("repository", "ok", repo))
+        else:
+            remote = _get_git_remote(resolved)
+            if remote:
+                from leap.core.experiment import update_frontmatter_field
+                update_frontmatter_field(root_readme, "repository", remote)
+                results.append(_doctor_row(
+                    "repository", "ok",
+                    f"Auto-populated from git remote: {remote}",
+                ))
+            else:
+                results.append(_doctor_row(
+                    "repository", "warning",
+                    "No repository in README and no git remote found",
+                ))
 
     exp_dir = experiments_dir(resolved)
     if exp_dir.is_dir():
-        results.append({"check": "experiments_dir", "status": "ok", "message": str(exp_dir)})
+        results.append(_doctor_row("experiments_dir", "ok", str(exp_dir)))
     else:
-        results.append({"check": "experiments_dir", "status": "error", "message": "experiments/ not found"})
+        results.append(_doctor_row("experiments_dir", "error", "experiments/ not found"))
 
     if exp_dir.is_dir():
         exp_names = [c.name for c in sorted(exp_dir.iterdir()) if c.is_dir()]
         if exp_names:
-            results.append({"check": "experiments", "status": "ok", "message": f"{len(exp_names)}: {', '.join(exp_names)}"})
+            results.append(
+                _doctor_row("experiments", "ok", f"{len(exp_names)}: {', '.join(exp_names)}")
+            )
+
+            # Check each experiment's README and type
+            for exp_name in exp_names:
+                exp_readme = exp_dir / exp_name / "README.md"
+                if exp_readme.is_file():
+                    efm = parse_frontmatter(exp_readme)
+                    etype = efm.get("type", "")
+                    if etype == "experiment":
+                        pass  # expected, don't clutter output
+                    elif etype == "lab":
+                        results.append(
+                            _doctor_row(
+                                f"experiment:{exp_name}",
+                                "warning",
+                                "Has type: lab — should be type: experiment",
+                            )
+                        )
+                    elif not etype:
+                        results.append(
+                            _doctor_row(
+                                f"experiment:{exp_name}",
+                                "warning",
+                                "Missing 'type' field in README frontmatter",
+                            )
+                        )
+                else:
+                    results.append(
+                        _doctor_row(f"experiment:{exp_name}", "warning", "No README.md")
+                    )
+
+                # Check experiment dependencies
+                req_file = exp_dir / exp_name / "requirements.txt"
+                if req_file.is_file():
+                    missing_pkgs = []
+                    for line in req_file.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if not line or line.startswith("#") or line.startswith("-"):
+                            continue
+                        import importlib.util
+                        # Strip version specifiers (e.g. pyyaml>=6.0 → pyyaml)
+                        pkg = line.split(">=")[0].split("<=")[0].split("==")[0].split("~=")[0].split("!=")[0].split("[")[0].strip()
+                        import_name = pkg.replace("-", "_").lower()
+                        import_name = _IMPORT_MAP.get(import_name, import_name)
+                        if importlib.util.find_spec(import_name) is None:
+                            missing_pkgs.append(pkg)
+                    if missing_pkgs:
+                        results.append(_doctor_row(
+                            f"deps:{exp_name}", "warning",
+                            f"Missing: {', '.join(missing_pkgs)}",
+                        ))
+                    else:
+                        results.append(_doctor_row(
+                            f"deps:{exp_name}", "ok",
+                            "All dependencies installed",
+                        ))
         else:
-            results.append({"check": "experiments", "status": "warning", "message": "No experiments found"})
+            results.append(_doctor_row("experiments", "warning", "No experiments found"))
+
+    # Check experiments list in root README vs filesystem
+    if root_readme.is_file() and exp_dir.is_dir():
+        listed_entries = get_experiment_list(root_readme)
+        listed = {e["name"] for e in listed_entries if isinstance(e, dict) and "name" in e}
+        on_disk = {c.name for c in exp_dir.iterdir() if c.is_dir() and validate_experiment_name(c.name)}
+        entries_by_name = {e["name"]: e for e in listed_entries if isinstance(e, dict)}
+
+        unlisted = sorted(on_disk - listed)
+        missing = sorted(listed - on_disk)
+
+        if not unlisted and not missing:
+            results.append(_doctor_row(
+                "experiments_list", "ok",
+                f"README tracks {len(listed)} experiment(s), all match filesystem",
+            ))
+        else:
+            if unlisted:
+                results.append(_doctor_row(
+                    "experiments_list", "warning",
+                    f"On disk but not in README: {', '.join(unlisted)}",
+                ))
+            if missing:
+                for m in missing:
+                    entry = entries_by_name.get(m, {})
+                    source = entry.get("source", "")
+                    if source:
+                        results.append(_doctor_row(
+                            "experiments_list", "warning",
+                            f"'{m}' in README (from {source}) but not on disk — reinstall or remove from README",
+                        ))
+                    else:
+                        results.append(_doctor_row(
+                            "experiments_list", "warning",
+                            f"'{m}' in README but not on disk — recreate or remove from README",
+                        ))
+
+        # Check source consistency: URL source but no .git dir means it's local
+        for name_on_disk in sorted(on_disk & listed):
+                entry = entries_by_name.get(name_on_disk, {})
+                source = entry.get("source", "")
+                has_own_git = (exp_dir / name_on_disk / ".git").is_dir()
+                if source and not has_own_git:
+                    results.append(_doctor_row(
+                        "experiment_source", "warning",
+                        f"'{name_on_disk}' has source '{source}' but no .git dir — should have no source",
+                    ))
 
     cred_path = credentials_path(resolved)
+    # Read at check time (not leap.config snapshot) so `ADMIN_PASSWORD=… leap doctor` matches server behavior.
+    admin_pw_env = os.environ.get("ADMIN_PASSWORD", "").strip()
     if cred_path.is_file():
-        results.append({"check": "credentials", "status": "ok", "message": str(cred_path)})
+        results.append(_doctor_row("credentials", "ok", str(cred_path)))
+    elif admin_pw_env:
+        results.append(
+            _doctor_row(
+                "credentials",
+                "ok",
+                "admin_credentials.json missing — ADMIN_PASSWORD is set (file will be created on `leap run`)",
+            )
+        )
     else:
-        results.append({"check": "credentials", "status": "warning", "message": "admin_credentials.json missing"})
+        results.append(
+            _doctor_row("credentials", "warning", "admin_credentials.json missing")
+        )
 
     for pkg_name in ("fastapi", "uvicorn", "sqlalchemy", "duckdb", "typer"):
         try:
             __import__(pkg_name)
-            results.append({"check": f"package:{pkg_name}", "status": "ok", "message": "importable"})
+            results.append(_doctor_row(f"package:{pkg_name}", "ok", "importable"))
         except ImportError:
-            results.append({"check": f"package:{pkg_name}", "status": "error", "message": "not installed"})
+            results.append(_doctor_row(f"package:{pkg_name}", "error", "not installed"))
 
     return results
 
@@ -446,19 +1146,46 @@ def export_logs_fn(
     return len(all_logs)
 
 
+def remove_experiment_fn(
+    name: str,
+    root: Path | None = None,
+) -> Path:
+    """Remove an experiment directory and its README tracking entry. Returns the removed path."""
+    from leap.core.experiment import validate_experiment_name, remove_experiment_entry
+
+    resolved = _resolve_root(root)
+    if not validate_experiment_name(name):
+        raise typer.BadParameter(f"Invalid experiment name '{name}'.")
+
+    exp_path = resolved / "experiments" / name
+    if not exp_path.is_dir():
+        raise typer.BadParameter(f"Experiment '{name}' not found at {exp_path}")
+
+    shutil.rmtree(exp_path)
+
+    _remove_gitignore_entry(resolved, name)
+
+    root_readme = resolved / "README.md"
+    if root_readme.is_file():
+        remove_experiment_entry(root_readme, name)
+
+    return exp_path
+
+
 def install_experiment_fn(
     url: str,
     name: str | None = None,
     root: Path | None = None,
-) -> tuple[str, Path]:
-    """Clone an experiment from a Git URL into experiments/.
+) -> tuple[str, Path, bool]:
+    """Clone or update an experiment from a Git URL into experiments/.
 
-    Returns (experiment_name, experiment_path).
+    Returns (experiment_name, experiment_path, updated).
     """
     from leap.core.experiment import validate_experiment_name
 
     resolved = _resolve_root(root)
     exp_base = resolved / "experiments"
+    exp_base_existed = exp_base.exists()
     exp_base.mkdir(parents=True, exist_ok=True)
 
     if not name:
@@ -474,24 +1201,60 @@ def install_experiment_fn(
         )
 
     dest = exp_base / name
+    updating = False
+
     if dest.exists():
-        raise typer.BadParameter(f"Experiment '{name}' already exists at {dest}")
+        if not (dest / ".git").is_dir():
+            raise typer.BadParameter(
+                f"Experiment '{name}' exists but was not installed from a remote. "
+                "Cannot update."
+            )
+        if not typer.confirm(
+            f"Experiment '{name}' already exists. Update from remote?",
+            default=True,
+        ):
+            raise typer.Abort()
+        try:
+            subprocess.run(
+                ["git", "pull"],
+                cwd=str(dest),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            raise typer.BadParameter("git is not installed or not on PATH")
+        except subprocess.CalledProcessError as e:
+            raise typer.BadParameter(f"git pull failed: {e.stderr.strip()}")
+        updating = True
+    else:
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in ("https", "http", "git", "ssh", ""):
+            raise typer.BadParameter(f"Unsupported URL scheme: '{parsed_url.scheme}'")
 
-    parsed_url = urlparse(url)
-    if parsed_url.scheme not in ("https", "http", "git", "ssh", ""):
-        raise typer.BadParameter(f"Unsupported URL scheme: '{parsed_url.scheme}'")
+        try:
+            subprocess.run(
+                ["git", "clone", url, str(dest)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            raise typer.BadParameter("git is not installed or not on PATH")
+        except subprocess.CalledProcessError as e:
+            raise typer.BadParameter(f"git clone failed: {e.stderr.strip()}")
 
-    try:
-        subprocess.run(
-            ["git", "clone", url, str(dest)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        raise typer.BadParameter("git is not installed or not on PATH")
-    except subprocess.CalledProcessError as e:
-        raise typer.BadParameter(f"git clone failed: {e.stderr.strip()}")
+        # Detect if cloned repo is a lab rather than an experiment
+        from leap.core.experiment import parse_frontmatter
+        cloned_readme = dest / "README.md"
+        if cloned_readme.is_file():
+            cloned_fm = parse_frontmatter(cloned_readme)
+            if cloned_fm.get("type") == "lab":
+                shutil.rmtree(dest)
+                # Clean up experiments/ dir if we created it
+                if not exp_base_existed and exp_base.exists() and not any(exp_base.iterdir()):
+                    exp_base.rmdir()
+                raise LabDetectedError(name, url)
 
     req_file = dest / "requirements.txt"
     if req_file.is_file():
@@ -506,24 +1269,207 @@ def install_experiment_fn(
         except subprocess.CalledProcessError as e:
             logger.warning("pip install failed for %s: %s", name, e.stderr.strip())
 
-    return name, dest
+    # Add to .gitignore so the lab's git doesn't track nested repos
+    _add_gitignore_entry(resolved, name)
+
+    # Track in root README
+    root_readme = resolved / "README.md"
+    if root_readme.is_file():
+        from leap.core.experiment import add_experiment_entry
+        add_experiment_entry(root_readme, name, source=url)
+
+    return name, dest, updating
+
+
+def discover_registry_fn(tag: str | None = None, entry_type: str | None = None) -> list[dict]:
+    """Fetch the leaplive registry and return entries, optionally filtered by tag or type."""
+    try:
+        response = requests.get(REGISTRY_URL, timeout=10)
+        response.raise_for_status()
+    except Exception as exc:
+        raise typer.BadParameter(f"Failed to fetch registry: {exc}")
+
+    entries = yaml.safe_load(response.text)
+    if not entries:
+        return []
+
+    if tag:
+        tag_lower = tag.lower()
+        entries = [
+            e for e in entries
+            if any(t.lower() == tag_lower for t in e.get("tags", []))
+        ]
+
+    if entry_type:
+        entries = [e for e in entries if e.get("type", "") == entry_type]
+
+    return entries
+
+
+def publish_experiment_fn(
+    experiment: str,
+    root: Path | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Publish an experiment to the leaplive registry. Returns status dict."""
+    return publish_fn(experiment=experiment, root=root, dry_run=dry_run)
+
+
+def publish_fn(
+    experiment: str | None = None,
+    root: Path | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Publish an experiment or lab to the leaplive registry. Returns status dict."""
+    from leap.core.experiment import parse_frontmatter, update_frontmatter_field
+
+    if experiment:
+        # Publishing a single experiment within a lab
+        resolved = _resolve_root(root)
+        exp_path = resolved / "experiments" / experiment
+        if not exp_path.is_dir():
+            raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
+        readme_path = exp_path / "README.md"
+        publish_dir = exp_path
+    else:
+        # Publishing from current directory (or root override)
+        publish_dir = Path(root) if root else Path.cwd()
+        readme_path = publish_dir / "README.md"
+
+    fm = parse_frontmatter(readme_path)
+
+    # Resolve repository: frontmatter → git remote
+    repository = fm.get("repository", "")
+    if not repository:
+        repository = _get_git_remote(publish_dir)
+
+    # Validate required fields
+    missing = []
+    name = fm.get("name", "") or experiment or ""
+    entry_type = fm.get("type", "experiment")
+    description = fm.get("description", "")
+    if not description:
+        missing.append("description")
+    if not repository:
+        missing.append("repository")
+    if missing:
+        raise typer.BadParameter(f"Missing required fields: {', '.join(missing)}")
+
+    # Verify repository is reachable
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", repository],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode != 0:
+            raise typer.BadParameter(
+                f"Repository '{repository}' is not reachable. "
+                "Push your code first, then try again."
+            )
+    except FileNotFoundError:
+        raise typer.BadParameter("git is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        raise typer.BadParameter(
+            f"Repository '{repository}' timed out. Check the URL and try again."
+        )
+
+    # Check local repo is clean and pushed
+    if (publish_dir / ".git").is_dir():
+        git_dir = publish_dir
+    elif experiment:
+        git_dir = _resolve_root(root)
+    else:
+        git_dir = publish_dir
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(git_dir), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if status.returncode == 0 and status.stdout.strip():
+            raise typer.BadParameter(
+                "You have uncommitted changes. Commit and push before publishing."
+            )
+        unpushed = subprocess.run(
+            ["git", "-C", str(git_dir), "log", "--oneline", "@{u}..HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if unpushed.returncode == 0 and unpushed.stdout.strip():
+            raise typer.BadParameter(
+                "You have unpushed commits. Push to remote before publishing."
+            )
+    except FileNotFoundError:
+        pass  # git not found — already caught above
+
+    # Write repository back to frontmatter if it was missing
+    if not fm.get("repository", "") and repository:
+        if update_frontmatter_field(readme_path, "repository", repository):
+            try:
+                subprocess.run(
+                    ["git", "-C", str(git_dir), "add", str(readme_path)],
+                    capture_output=True, text=True, timeout=5,
+                )
+                subprocess.run(
+                    ["git", "-C", str(git_dir), "commit", "-m",
+                     f"chore: add repository URL to {name} frontmatter"],
+                    capture_output=True, text=True, timeout=5,
+                )
+            except Exception:
+                pass  # non-fatal — user can commit manually
+
+    result = {
+        "name": name,
+        "repository": repository,
+        "issue_url": None,
+        "status": "pending",
+    }
+
+    if dry_run:
+        result["status"] = "dry_run"
+        return result
+
+    manual_url = f"https://github.com/{REGISTRY_REPO}/issues/new"
+
+    if shutil.which("gh") is None:
+        result["status"] = "no_gh"
+        result["manual_url"] = manual_url
+        return result
+
+    entry = {
+        "name": name,
+        "type": entry_type,
+        "display_name": fm.get("display_name", "") or name,
+        "description": description,
+        "author": fm.get("author", ""),
+        "repository": repository,
+        "tags": fm.get("tags", []),
+    }
+    body = "```yaml\n" + yaml.dump([entry], default_flow_style=False, sort_keys=False) + "```"
+
+    try:
+        proc = subprocess.run(
+            ["gh", "issue", "create",
+             "--repo", REGISTRY_REPO,
+             "--title", f"Add {entry_type}: {name}",
+             "--body", body],
+            capture_output=True, text=True, timeout=30,
+        )
+        if proc.returncode == 0:
+            issue_url = proc.stdout.strip()
+            result["issue_url"] = issue_url
+            result["status"] = "submitted"
+        else:
+            result["status"] = "gh_error"
+            result["error"] = proc.stderr.strip()
+            result["manual_url"] = manual_url
+    except Exception as exc:
+        result["status"] = "gh_error"
+        result["error"] = str(exc)
+        result["manual_url"] = manual_url
+
+    return result
 
 
 # ── Template generators for `leap init` ──
-
-def _template_theme_css() -> str:
-    src = Path(__file__).resolve().parent.parent / "ui" / "shared" / "theme.css"
-    if src.is_file():
-        return src.read_text(encoding="utf-8")
-    return "/* LEAP2 theme — run from repo root or copy theme.css manually */\n"
-
-
-def _template_landing_html() -> str:
-    src = Path(__file__).resolve().parent.parent / "ui" / "landing" / "index.html"
-    if src.is_file():
-        return src.read_text(encoding="utf-8")
-    return "<!DOCTYPE html><html><body><h1>LEAP2</h1><p>Landing page placeholder.</p></body></html>\n"
-
 
 
 # ── CLI commands ──
@@ -537,6 +1483,91 @@ def set_password(
     set_password_fn(root)
 
 
+@app.command("init")
+def init_command(
+    password: bool = typer.Option(
+        False,
+        "--password",
+        help="Set password even if admin credentials already exist.",
+    ),
+    skip_password: bool = typer.Option(
+        False,
+        "--skip-password",
+        help="Do not prompt for password (set ADMIN_PASSWORD or run leap set-password later).",
+    ),
+):
+    """Initialize the current directory as a LEAP lab root."""
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
+    try:
+        results = init_fn(force_password=password, skip_password=skip_password)
+    except typer.BadParameter as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    console = Console()
+
+    # Structure table
+    table = Table(title="LEAP lab initialized", show_header=True, header_style="bold")
+    table.add_column("Item", style="cyan", no_wrap=True)
+    table.add_column("Status", justify="center", width=10)
+
+    # Directories and files
+    dir_keys = ["experiments", "config"]
+    file_keys = [".gitignore"]
+    for key in dir_keys + file_keys:
+        status = results.get(key, "")
+        if status == "created":
+            table.add_row(key, Text("created", style="green"))
+        elif status in ("exists", "updated"):
+            table.add_row(key, Text(status, style="dim"))
+
+    # README
+    readme_status = results.get("readme", "")
+    if readme_status == "created":
+        table.add_row("README.md", Text("created", style="green"))
+    elif readme_status == "updated":
+        table.add_row("README.md", Text("updated", style="yellow"))
+    elif readme_status == "skipped":
+        table.add_row("README.md", Text("exists", style="dim"))
+
+    # Repository
+    if results.get("repository"):
+        table.add_row("repository", Text(results["repository"], style="green"))
+
+    # Experiments synced
+    if results.get("experiments_synced"):
+        table.add_row("experiments synced", Text(results["experiments_synced"], style="green"))
+
+    # Dependencies installed
+    if results.get("deps_installed"):
+        table.add_row("deps installed", Text(results["deps_installed"], style="green"))
+
+    # Reinstalled experiments
+    if results.get("experiments_reinstalled"):
+        table.add_row("reinstalled", Text(results["experiments_reinstalled"], style="green"))
+
+    # Password
+    pw = results.get("password", "")
+    if pw == "set":
+        table.add_row("password", Text("set", style="green"))
+    elif pw == "exists":
+        table.add_row("password", Text("exists", style="dim"))
+    elif pw == "skipped":
+        table.add_row("password", Text("skipped", style="yellow"))
+
+    console.print(table)
+
+    if pw == "skipped":
+        console.print(
+            "\n[yellow]Set ADMIN_PASSWORD or run `leap set-password` before serving.[/yellow]"
+        )
+
+    console.print(f"\n[bold green]Ready![/bold green] Run [cyan]leap run[/cyan] to start the server.")
+
+
 @app.command()
 def run(
     host: str = typer.Option("0.0.0.0", help="Bind address"),
@@ -548,7 +1579,23 @@ def run(
     from leap.main import create_app
 
     resolved = _resolve_root(root)
-    init_project_fn(resolved)
+
+    # Verify project is initialized
+    if not _is_lab_root(resolved):
+        typer.echo(
+            "Error: This directory is not an initialized LEAP lab.\n"
+            "Run 'leap init' first to set up the project.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if not (resolved / "experiments").is_dir():
+        typer.echo(
+            "Error: No experiments/ directory found.\n"
+            "Run 'leap init' to set up the project structure.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     the_app = create_app(root=resolved)
     typer.echo(f"Starting LEAP2 on {host}:{port} (root: {resolved})")
     uvicorn.run(the_app, host=host, port=port)
@@ -609,22 +1656,200 @@ def list_students(
         typer.echo(f"{s['student_id']:<20} {s['name']:<30} {s.get('email') or ''}")
 
 
-@app.command("new")
-def new_experiment(
-    name: str = typer.Argument(..., help="Experiment name (lowercase, digits, hyphens, underscores)"),
-    root: Optional[Path] = typer.Option(None, help="Project root override"),
-):
-    """Create a new experiment scaffold."""
+def _is_url(s: str) -> bool:
+    """Return True if *s* looks like a Git URL rather than an experiment name."""
+    if "://" in s or s.endswith(".git"):
+        return True
+    return s.startswith(("github.com/", "gitlab.com/", "bitbucket.org/"))
+
+
+def _is_local_path(s: str) -> bool:
+    """Return True if *s* looks like a local filesystem path."""
+    return os.sep in s or s.startswith(".") or s.startswith("~")
+
+
+def copy_experiment_fn(
+    src: str,
+    name: str | None = None,
+    root: Path | None = None,
+) -> tuple[str, Path]:
+    """Copy an experiment from a local directory into experiments/.
+
+    Validates that the source has a README with type: experiment frontmatter.
+    Returns (experiment_name, experiment_path).
+    """
+    from leap.core.experiment import parse_frontmatter, validate_experiment_name
+
+    src_path = Path(src).expanduser().resolve()
+    if not src_path.is_dir():
+        raise typer.BadParameter(f"Path '{src}' is not a directory.")
+
+    readme = src_path / "README.md"
+    if not readme.is_file():
+        raise typer.BadParameter(
+            f"No README.md found in '{src_path}'. "
+            "A valid experiment must have a README.md with type: experiment frontmatter."
+        )
+
+    fm = parse_frontmatter(readme)
+    if fm.get("type") != "experiment":
+        raise typer.BadParameter(
+            f"'{src_path}' is not an experiment (type: '{fm.get('type')}'). "
+            "Only experiments can be added to a lab."
+        )
+
+    exp_name = name or fm.get("name") or src_path.name.lower().replace(" ", "-")
+    if not validate_experiment_name(exp_name):
+        raise typer.BadParameter(
+            f"Derived experiment name '{exp_name}' is invalid. "
+            "Use --name to specify a valid name ([a-z0-9][a-z0-9_-]*)."
+        )
+
+    resolved = _resolve_root(root)
+    exp_base = resolved / "experiments"
+    exp_base.mkdir(parents=True, exist_ok=True)
+    dest = exp_base / exp_name
+
+    if dest.exists():
+        raise typer.BadParameter(
+            f"Experiment '{exp_name}' already exists at {dest}."
+        )
+
+    def _ignore_git(directory, contents):
+        return [".git"] if ".git" in contents else []
+
+    shutil.copytree(src_path, dest, ignore=_ignore_git)
+
+    # Track in root README
+    root_readme = resolved / "README.md"
+    if root_readme.is_file():
+        from leap.core.experiment import add_experiment_entry
+        add_experiment_entry(root_readme, exp_name, source="")
+
+    return exp_name, dest
+
+
+def _handle_lab_add(url: str, name: str):
+    """Handle adding a lab — clone into cwd or error if inside a lab/experiment."""
+    cwd = Path.cwd()
+
+    # Check if inside a lab or under a lab's directory tree
+    if _is_lab_root(cwd) or any(_is_lab_root(p) for p in cwd.parents):
+        typer.echo(
+            f"Error: Cannot add lab '{name}' — you are inside another lab.\n"
+            f"Run this command from a directory above, or: git clone {url}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    # Plain directory — clone here
+    dest = cwd / name
+    if dest.exists():
+        typer.echo(f"Error: Directory '{name}' already exists.", err=True)
+        raise typer.Exit(1)
+
     try:
-        exp_path = new_experiment_fn(name, root)
+        subprocess.run(
+            ["git", "clone", url, str(dest)],
+            check=True, capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        typer.echo("Error: git is not installed or not on PATH.", err=True)
+        raise typer.Exit(1)
+    except subprocess.CalledProcessError as e:
+        typer.echo(f"Error: git clone failed: {e.stderr.strip()}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Cloned lab '{name}' to {dest}")
+    typer.echo(f"Next: cd {name} && leap init")
+
+
+@app.command("add")
+def add_experiment(
+    name_or_url: str = typer.Argument(..., help="Experiment name, Git URL, or local path"),
+    name: Optional[str] = typer.Option(None, "--name", help="Override experiment name"),
+    root: Optional[Path] = typer.Option(None, help="Project root override"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Skip interactive prompts, use defaults"),
+):
+    """Add an experiment or lab — scaffold, clone from a Git URL, or copy from a local path."""
+    # Normalize bare host URLs (e.g. github.com/owner/repo → https://github.com/owner/repo)
+    if _is_url(name_or_url) and "://" not in name_or_url and not name_or_url.endswith(".git"):
+        name_or_url = "https://" + name_or_url
+
+    if _is_url(name_or_url):
+        try:
+            exp_name, exp_path, updated = install_experiment_fn(name_or_url, name, root)
+        except LabDetectedError as e:
+            _handle_lab_add(e.url, e.name)
+            return
+        except typer.Abort:
+            typer.echo("Aborted.")
+            raise typer.Exit(0)
+        except typer.BadParameter as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+
+        if updated:
+            typer.echo(f"Updated experiment '{exp_name}' at {exp_path}")
+        else:
+            typer.echo(f"Installed experiment '{exp_name}' at {exp_path}")
+
+        results = validate_experiment_fn(exp_name, root)
+        if _print_validation_results(results):
+            typer.echo("Some checks had warnings — review above.")
+        else:
+            typer.echo("Validation passed.")
+        typer.echo("Restart the server to load the new experiment.")
+    elif _is_local_path(name_or_url):
+        try:
+            exp_name, exp_path = copy_experiment_fn(name_or_url, name, root)
+        except typer.BadParameter as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+
+        typer.echo(f"Copied experiment '{exp_name}' from {name_or_url} to {exp_path}")
+
+        results = validate_experiment_fn(exp_name, root)
+        if _print_validation_results(results):
+            typer.echo("Some checks had warnings — review above.")
+        else:
+            typer.echo("Validation passed.")
+        typer.echo("Restart the server to load the new experiment.")
+    else:
+        try:
+            exp_path = new_experiment_fn(name_or_url, root, interactive=not no_prompt)
+        except typer.BadParameter as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"\nCreated experiment '{name_or_url}' at {exp_path}")
+        typer.echo("Next steps:")
+        typer.echo(f"  1. Edit experiments/{name_or_url}/funcs/functions.py")
+        typer.echo(f"  2. Edit experiments/{name_or_url}/README.md")
+        typer.echo(f"  3. Restart server or reload functions")
+
+
+@app.command("remove")
+def remove_experiment(
+    name: str = typer.Argument(..., help="Experiment name to remove"),
+    root: Optional[Path] = typer.Option(None, help="Project root override"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Remove an experiment from the lab."""
+    resolved = _resolve_root(root)
+    exp_path = resolved / "experiments" / name
+    if not exp_path.is_dir():
+        typer.echo(f"Error: Experiment '{name}' not found at {exp_path}", err=True)
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.confirm(f"Remove experiment '{name}' at {exp_path}? This deletes the directory.", abort=True)
+
+    try:
+        remove_experiment_fn(name, root)
     except typer.BadParameter as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
-    typer.echo(f"Created experiment '{name}' at {exp_path}")
-    typer.echo("Next steps:")
-    typer.echo(f"  1. Edit experiments/{name}/funcs/functions.py")
-    typer.echo(f"  2. Edit experiments/{name}/README.md")
-    typer.echo(f"  3. Restart server or reload functions")
+    typer.echo(f"Removed experiment '{name}'.")
 
 
 @app.command("list")
@@ -650,17 +1875,7 @@ def validate_exp(
 ):
     """Validate an experiment (README, funcs, entry_point)."""
     results = validate_experiment_fn(name, root)
-    has_errors = False
-    for r in results:
-        if r["status"] == "ok":
-            icon = "✓"
-        elif r["status"] == "warning":
-            icon = "!"
-        else:
-            icon = "✗"
-            has_errors = True
-        typer.echo(f"  {icon} {r['check']}: {r['message']}")
-    if has_errors:
+    if _print_validation_results(results):
         raise typer.Exit(1)
     typer.echo("Validation passed.")
 
@@ -686,28 +1901,124 @@ def doctor(
     root: Optional[Path] = typer.Option(None, help="Project root override"),
 ):
     """Validate LEAP2 setup (Python, packages, directories)."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
     results = doctor_fn(root)
     errors = 0
     warnings = 0
+
+    table = Table(title="LEAP2 doctor", show_header=True, header_style="bold")
+    table.add_column("Status", justify="center", style="bold", no_wrap=True, width=10)
+    table.add_column("Check", style="cyan", no_wrap=True)
+    table.add_column("Message")
+    table.add_column("Fix", overflow="fold")
+
     for r in results:
         if r["status"] == "ok":
-            icon = "✓"
+            status = Text("✓ OK", style="green")
         elif r["status"] == "warning":
-            icon = "!"
+            status = Text("! WARN", style="yellow")
             warnings += 1
         else:
-            icon = "✗"
+            status = Text("✗ FAIL", style="red")
             errors += 1
-        typer.echo(f"  {icon} {r['check']}: {r['message']}")
+        hint = (r.get("hint") or "").strip()
+        fix_cell = Text("—", style="dim") if not hint else hint
+        table.add_row(status, r["check"], r["message"], fix_cell)
 
-    typer.echo("")
+    console = Console()
+    console.print(table)
+    console.print()
+
+    # Interactive resolution for experiments_list mismatches
+    exp_list_warnings = [r for r in results if r["check"] == "experiments_list" and r["status"] == "warning"]
+    if exp_list_warnings:
+        from leap.core.experiment import (
+            add_experiment_entry, remove_experiment_entry, get_experiment_list,
+            validate_experiment_name,
+        )
+
+        resolved = _resolve_root(root)
+        root_readme = resolved / "README.md"
+        exp_dir = resolved / "experiments"
+
+        if root_readme.is_file() and exp_dir.is_dir():
+            listed_entries = get_experiment_list(root_readme)
+            listed = {e["name"] for e in listed_entries if isinstance(e, dict) and "name" in e}
+            on_disk = {c.name for c in exp_dir.iterdir() if c.is_dir() and validate_experiment_name(c.name)}
+            entries_by_name = {e["name"]: e for e in listed_entries if isinstance(e, dict)}
+
+            console.print("[bold]Resolve experiment list mismatches:[/bold]")
+            console.print()
+
+            # Experiments on disk but not in README
+            for name in sorted(on_disk - listed):
+                source = _get_git_remote(exp_dir / name) or "local"
+                if typer.confirm(f"  Add '{name}' (source: {source}) to README?", default=True):
+                    add_experiment_entry(root_readme, name, source)
+                    console.print(f"    Added '{name}'.")
+
+            # Experiments in README but not on disk
+            for name in sorted(listed - on_disk):
+                entry = entries_by_name.get(name, {})
+                source = entry.get("source", "local")
+                if source and source != "local":
+                    if typer.confirm(f"  '{name}' missing. Reinstall from {source}?", default=True):
+                        try:
+                            install_experiment_fn(source, name=name, root=resolved)
+                            console.print(f"    Reinstalled '{name}'.")
+                        except Exception as e:
+                            console.print(f"    [red]Failed: {e}[/red]")
+                            if typer.confirm(f"  Remove '{name}' from README?", default=False):
+                                remove_experiment_entry(root_readme, name)
+                                console.print(f"    Removed '{name}'.")
+                    elif typer.confirm(f"  Remove '{name}' from README?", default=False):
+                        remove_experiment_entry(root_readme, name)
+                        console.print(f"    Removed '{name}'.")
+                else:
+                    if typer.confirm(f"  Local experiment '{name}' missing. Create empty scaffold?", default=False):
+                        try:
+                            new_experiment_fn(name, root=resolved, interactive=False)
+                            console.print(f"    Created scaffold for '{name}'.")
+                        except Exception as e:
+                            console.print(f"    [red]Failed: {e}[/red]")
+                    elif typer.confirm(f"  Remove '{name}' from README?", default=True):
+                        remove_experiment_entry(root_readme, name)
+                        console.print(f"    Removed '{name}'.")
+
+            console.print()
+
     if errors:
-        typer.echo(f"{errors} error(s), {warnings} warning(s)")
+        console.print(
+            Panel(
+                f"{errors} error(s), {warnings} warning(s)",
+                title="Summary",
+                border_style="red",
+                style="red",
+            )
+        )
         raise typer.Exit(1)
-    elif warnings:
-        typer.echo(f"All OK with {warnings} warning(s)")
+    if warnings:
+        console.print(
+            Panel(
+                f"All OK with {warnings} warning(s)",
+                title="Summary",
+                border_style="yellow",
+                style="yellow",
+            )
+        )
     else:
-        typer.echo("All checks passed.")
+        console.print(
+            Panel(
+                "All checks passed.",
+                title="Summary",
+                border_style="green",
+                style="green",
+            )
+        )
 
 
 @app.command("export")
@@ -732,39 +2043,150 @@ def export_logs(
     typer.echo(f"Exported {count} log(s) to {output} ({fmt})")
 
 
-@app.command("install")
-def install_experiment(
-    url: str = typer.Argument(..., help="Git URL of the experiment repo"),
-    name: Optional[str] = typer.Option(None, help="Override experiment name"),
-    root: Optional[Path] = typer.Option(None, help="Project root override"),
+@app.command("discover")
+def discover(
+    tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Filter by tag"),
+    entry_type: Optional[str] = typer.Option(None, "--type", help="Filter by type: experiment or lab"),
 ):
-    """Clone an experiment from a Git URL."""
+    """Browse experiments and labs in the leaplive registry."""
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
     try:
-        exp_name, exp_path = install_experiment_fn(url, name, root)
+        labs = discover_registry_fn(tag, entry_type=entry_type)
     except typer.BadParameter as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Installed experiment '{exp_name}' at {exp_path}")
+    console = Console()
 
-    results = validate_experiment_fn(exp_name, root)
-    has_issues = False
-    for r in results:
-        if r["status"] == "ok":
-            icon = "✓"
-        elif r["status"] == "warning":
-            icon = "!"
-            has_issues = True
-        else:
-            icon = "✗"
-            has_issues = True
-        typer.echo(f"  {icon} {r['check']}: {r['message']}")
+    if not labs:
+        console.print("[dim]No entries found in registry.[/dim]")
+        return
 
-    if has_issues:
-        typer.echo("Some checks had warnings — review above.")
+    table = Table(title="LEAP Registry", show_header=True, header_style="bold")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Type", justify="center", width=12)
+    table.add_column("Description")
+    table.add_column("Tags", style="dim")
+    table.add_column("Repository")
+
+    for lab in labs:
+        name = lab.get("name", "")
+        entry_type = lab.get("type", "")
+        desc = lab.get("description", "")
+        tags = ", ".join(lab.get("tags", []))
+        repo = lab.get("repository", "")
+        type_text = Text(entry_type, style="green" if entry_type == "lab" else "blue")
+        short_repo = _shorten_repo_url(repo)
+        repo_text = f"[link={repo}]{short_repo}[/link]" if repo else ""
+        table.add_row(name, type_text, desc, tags, repo_text)
+
+    console.print(table)
+    console.print()
+    example_repo = labs[0].get("repository", "")
+    example_short = _shorten_repo_url(example_repo)
+    console.print(f"Install with:  [bold]leap add {example_short}[/bold]")
+
+
+@app.command("publish")
+def publish(
+    experiment: Optional[str] = typer.Argument(None, help="Experiment name (omit to publish the lab)"),
+    root: Optional[Path] = typer.Option(None, help="Project root override"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without submitting"),
+):
+    """Publish an experiment or lab to the leaplive registry."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+    from leap.core.experiment import parse_frontmatter
+
+    if experiment:
+        resolved = _resolve_root(root)
+        exp_path = resolved / "experiments" / experiment
+        if not exp_path.is_dir():
+            typer.echo(f"Error: Experiment '{experiment}' not found", err=True)
+            raise typer.Exit(1)
+        readme_path = exp_path / "README.md"
     else:
-        typer.echo("Validation passed.")
-    typer.echo("Restart the server to load the new experiment.")
+        resolved = Path(root) if root else Path.cwd()
+        readme_path = resolved / "README.md"
+
+    # Run doctor checks first
+    console = Console()
+    results = doctor_fn(resolved)
+    errors = [r for r in results if r["status"] == "error"]
+    if errors:
+        error_lines = "\n".join(f"  [red]✗[/red] {r['check']}: {r['message']}" for r in errors)
+        console.print(Panel(
+            error_lines,
+            title="Doctor found errors — fix them before publishing",
+            style="red",
+        ))
+        raise typer.Exit(1)
+
+    fm = parse_frontmatter(readme_path)
+    entry_type = fm.get("type", "experiment")
+    name = fm.get("name", "") or experiment or ""
+
+    # Preview table
+    table = Table(title=f"Publishing {entry_type}", show_header=True, header_style="bold")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value")
+
+    table.add_row("name", Text(name, style="bold"))
+    table.add_row("type", Text(entry_type))
+    table.add_row("description", Text(fm.get("description", "") or "(missing)", style="" if fm.get("description") else "red"))
+    table.add_row("author", Text(fm.get("author", "") or "(none)", style="" if fm.get("author") else "dim"))
+    tags = ", ".join(fm.get("tags", []))
+    table.add_row("tags", Text(tags or "(none)", style="" if tags else "dim"))
+    repo = fm.get("repository", "")
+    table.add_row("repository", Text(repo or "(will infer from git)", style="" if repo else "yellow"))
+
+    console.print(table)
+
+    if not dry_run:
+        typer.confirm("Submit to leaplive registry?", abort=True)
+
+    try:
+        result = publish_fn(experiment=experiment, root=root, dry_run=dry_run)
+    except typer.BadParameter as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if result["status"] == "dry_run":
+        console.print(Panel(
+            f"[bold]{result['name']}[/bold]\n"
+            f"Repository: {result['repository']}",
+            title="Dry run — no submission made",
+            style="yellow",
+        ))
+    elif result["status"] == "no_gh":
+        url = result['manual_url']
+        console.print(Panel(
+            "[bold]gh CLI not found.[/bold]\n"
+            f"Install it from [link=https://cli.github.com]https://cli.github.com[/link]\n"
+            f"Or submit manually: [link={url}]{url}[/link]",
+            title="Manual submission required",
+            style="yellow",
+        ))
+    elif result["status"] == "submitted":
+        url = result['issue_url']
+        console.print(Panel(
+            f"Track it at: [link={url}]{url}[/link]",
+            title="Submitted!",
+            style="green",
+        ))
+    else:
+        manual = result.get('manual_url', '')
+        manual_line = f"\nSubmit manually: [link={manual}]{manual}[/link]" if manual else ""
+        console.print(Panel(
+            f"{result.get('error', 'unknown error')}{manual_line}",
+            title="Failed",
+            style="red",
+        ))
 
 
 def main():

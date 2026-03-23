@@ -32,6 +32,7 @@ class DeleteLogRequest(BaseModel):
 class DeleteLogsRequest(BaseModel):
     student_id: str | None = None
     trial: str | None = None
+    func_name: str | None = None
 
 
 class ImportStudentRow(BaseModel):
@@ -99,9 +100,9 @@ async def delete_logs(
     body: DeleteLogsRequest,
     session: Session = Depends(get_db_session),
 ):
-    if not body.student_id and not body.trial:
-        raise HTTPException(400, detail="Provide at least one of student_id or trial")
-    count = storage.delete_logs(session, student_id=body.student_id, trial=body.trial)
+    if not body.student_id and not body.trial and not body.func_name:
+        raise HTTPException(400, detail="At least one filter (student_id, trial, or func_name) is required")
+    count = storage.delete_logs(session, student_id=body.student_id, trial=body.trial, func_name=body.func_name)
     return {"ok": True, "deleted": count}
 
 

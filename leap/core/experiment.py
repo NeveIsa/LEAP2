@@ -24,6 +24,7 @@ VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ENTRY_POINT_README = "readme"
 
 DEFAULT_FRONTMATTER = {
+    "type": "experiment",
     "display_name": "",
     "description": "",
     "version": "",
@@ -32,6 +33,7 @@ DEFAULT_FRONTMATTER = {
     "author": "",
     "organization": "",
     "tags": [],
+    "repository": "",
 }
 
 
@@ -80,12 +82,8 @@ def validate_experiment_name(name: str) -> bool:
     return bool(VALID_NAME_RE.match(name))
 
 
-def parse_frontmatter(readme_path: Path) -> dict:
-    """Parse YAML frontmatter from a README.md file."""
-    if not readme_path.exists():
-        return dict(DEFAULT_FRONTMATTER)
-
-    text = readme_path.read_text(encoding="utf-8")
+def parse_frontmatter_text(text: str) -> dict:
+    """Parse YAML frontmatter from a README string."""
     if not text.startswith("---"):
         return dict(DEFAULT_FRONTMATTER)
 
@@ -95,13 +93,86 @@ def parse_frontmatter(readme_path: Path) -> dict:
 
     try:
         fm = yaml.safe_load(text[3:end]) or {}
-    except yaml.YAMLError as e:
-        logger.warning("Bad YAML frontmatter in %s: %s", readme_path, e)
+    except yaml.YAMLError:
         return dict(DEFAULT_FRONTMATTER)
 
     result = dict(DEFAULT_FRONTMATTER)
     result.update(fm)
     return result
+
+
+def parse_frontmatter(readme_path: Path) -> dict:
+    """Parse YAML frontmatter from a README.md file."""
+    if not readme_path.exists():
+        return dict(DEFAULT_FRONTMATTER)
+
+    text = readme_path.read_text(encoding="utf-8")
+    return parse_frontmatter_text(text)
+
+
+def update_frontmatter_field(readme_path: Path, field: str, value: Any) -> bool:
+    """Update or add a field in README YAML frontmatter. Returns True if written."""
+    if not readme_path.exists():
+        return False
+
+    text = readme_path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        return False
+
+    end = text.find("---", 3)
+    if end == -1:
+        return False
+
+    try:
+        parsed = yaml.safe_load(text[3:end]) or {}
+    except yaml.YAMLError:
+        return False
+
+    parsed[field] = value
+    new_yaml = yaml.dump(parsed, default_flow_style=False, sort_keys=False)
+    rebuilt = "---\n" + new_yaml + "---" + text[end + 3:]
+    readme_path.write_text(rebuilt, encoding="utf-8")
+    return True
+
+
+def get_experiment_list(readme_path: Path) -> list[dict]:
+    """Read the 'experiments' list from lab README frontmatter."""
+    fm = parse_frontmatter(readme_path)
+    entries = fm.get("experiments", [])
+    return entries if isinstance(entries, list) else []
+
+
+def add_experiment_entry(readme_path: Path, name: str, source: str = "") -> bool:
+    """Add or update an experiment entry in the lab README's experiments list.
+
+    Idempotent: if name already exists, updates its source. Returns True if written.
+    source should be a URL for remote experiments, or empty/"" for local ones.
+    """
+    entries = get_experiment_list(readme_path)
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("name") == name:
+            old_source = entry.get("source", "")
+            if old_source == source or (not old_source and not source):
+                return False
+            if source:
+                entry["source"] = source
+            else:
+                entry.pop("source", None)
+            return update_frontmatter_field(readme_path, "experiments", entries)
+    new_entry: dict = {"name": name}
+    if source:
+        new_entry["source"] = source
+    entries.append(new_entry)
+    return update_frontmatter_field(readme_path, "experiments", entries)
+
+
+def remove_experiment_entry(readme_path: Path, name: str) -> bool:
+    """Remove an experiment entry from the lab README's experiments list."""
+    entries = get_experiment_list(readme_path)
+    new_entries = [e for e in entries if not (isinstance(e, dict) and e.get("name") == name)]
+    if len(new_entries) == len(entries):
+        return False
+    return update_frontmatter_field(readme_path, "experiments", new_entries)
 
 
 def load_functions(funcs_dir: Path) -> dict[str, callable]:
@@ -186,6 +257,7 @@ class ExperimentInfo:
         self.author = self.frontmatter.get("author", "")
         self.organization = self.frontmatter.get("organization", "")
         self.tags = self.frontmatter.get("tags", [])
+        self.repository = self.frontmatter.get("repository", "")
 
         # Check leap_version requirement
         self.version_ok, self.version_message = check_leap_version(self.leap_version)
@@ -210,6 +282,7 @@ class ExperimentInfo:
         self.author = self.frontmatter.get("author", "")
         self.organization = self.frontmatter.get("organization", "")
         self.tags = self.frontmatter.get("tags", [])
+        self.repository = self.frontmatter.get("repository", "")
         self.version_ok, self.version_message = check_leap_version(self.leap_version)
         return self.frontmatter
 
@@ -235,6 +308,7 @@ class ExperimentInfo:
             "author": self.author,
             "organization": self.organization,
             "tags": self.tags,
+            "repository": self.repository,
         }
 
 

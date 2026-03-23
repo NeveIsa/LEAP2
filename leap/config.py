@@ -15,17 +15,49 @@ logging.basicConfig(
 )
 
 
+_PROJECT_ROOT_TYPES = ("lab",)
+
+
+def _is_lab_root(path: Path) -> bool:
+    """Check if a directory is a LEAP project root (has README.md with a project-level type in frontmatter)."""
+    readme = path / "README.md"
+    if not readme.is_file():
+        return False
+    try:
+        text = readme.read_text(encoding="utf-8")
+        if not text.startswith("---"):
+            return False
+        end = text.find("---", 3)
+        if end == -1:
+            return False
+        frontmatter = text[3:end]
+        for t in _PROJECT_ROOT_TYPES:
+            if f"type: {t}" in frontmatter or f"type: '{t}'" in frontmatter or f'type: "{t}"' in frontmatter:
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def get_root() -> Path:
-    """Resolve project root: LEAP_ROOT env > cwd > parent of leap package."""
+    """Resolve project root: LEAP_ROOT env > cwd (lab README or experiments/) > parent of leap package.
+
+    Also sets get_root.reason to explain how the root was resolved.
+    """
     if env := os.environ.get("LEAP_ROOT"):
+        get_root.reason = "LEAP_ROOT environment variable"
         return Path(env).resolve()
     cwd = Path.cwd()
-    if (cwd / "experiments").is_dir() or (cwd / "pyproject.toml").is_file():
+    if _is_lab_root(cwd):
+        get_root.reason = "cwd has README.md with type: lab"
         return cwd
-    pkg_parent = Path(__file__).resolve().parent.parent
-    if (pkg_parent / "experiments").is_dir():
-        return pkg_parent
+    if (cwd / "experiments").is_dir():
+        get_root.reason = "cwd has experiments/ directory"
+        return cwd
+    get_root.reason = "fallback to cwd (no lab detected)"
     return cwd
+
+get_root.reason = ""
 
 
 def experiments_dir(root: Path | None = None) -> Path:
@@ -40,8 +72,16 @@ def credentials_path(root: Path | None = None) -> Path:
     return config_dir(root) / "admin_credentials.json"
 
 
+def package_ui_dir() -> Path:
+    """Return the path to UI files bundled with the leap package."""
+    return Path(__file__).resolve().parent / "ui"
+
+
 def ui_dir(root: Path | None = None) -> Path:
-    return (root or get_root()) / "ui"
+    project_ui = (root or get_root()) / "ui"
+    if project_ui.is_dir():
+        return project_ui
+    return package_ui_dir()
 
 
 SESSION_SECRET_KEY = os.environ.get("SESSION_SECRET_KEY", "")
