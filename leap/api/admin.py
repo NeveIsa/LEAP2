@@ -123,16 +123,7 @@ async def export_logs(
 ):
     if fmt not in ("jsonlines", "csv"):
         raise HTTPException(400, detail=f"Unknown format '{fmt}'. Use 'jsonlines' or 'csv'.")
-    all_logs: list[dict] = []
-    after_id = None
-    while True:
-        page = storage.query_logs(session, n=5000, order="earliest", after_id=after_id)
-        if not page:
-            break
-        all_logs.extend(page)
-        if len(page) < 5000:
-            break
-        after_id = page[-1]["id"]
+    all_logs = storage.query_all_logs(session)
     return {"ok": True, "format": fmt, "count": len(all_logs), "logs": all_logs}
 
 

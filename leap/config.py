@@ -36,7 +36,7 @@ def parse_frontmatter_text(text: str, defaults: dict | None = None) -> dict:
     return result
 
 
-def _is_lab_root(path: Path) -> bool:
+def is_lab_root(path: Path) -> bool:
     """Check if a directory is a LEAP project root (has README.md with type: lab in frontmatter)."""
     readme = path / "README.md"
     if not readme.is_file():
@@ -58,7 +58,7 @@ def get_root() -> Path:
         get_root.reason = "LEAP_ROOT environment variable"
         return Path(env).resolve()
     cwd = Path.cwd()
-    if _is_lab_root(cwd):
+    if is_lab_root(cwd):
         get_root.reason = "cwd has README.md with type: lab"
         return cwd
     if (cwd / "experiments").is_dir():

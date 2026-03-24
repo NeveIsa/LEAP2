@@ -9,8 +9,6 @@ from typing import Any
 import requests
 
 
-# ── Exception hierarchy ──
-
 class RPCError(Exception):
     """Base exception for RPC client errors."""
 
@@ -31,7 +29,6 @@ class RPCNotRegisteredError(RPCServerError):
     """Raised when the student_id is not registered (HTTP 403)."""
 
 
-# ── Client ──
 
 class RPCClient:
     """Client for calling LEAP2 experiment functions via HTTP RPC.
@@ -77,8 +74,6 @@ class RPCClient:
         self._functions: dict[str, dict] | None = None
         self._discover()
 
-    # ── Discovery ──
-
     def _discover(self):
         """Fetch the list of available functions from the server."""
         try:
@@ -87,8 +82,6 @@ class RPCClient:
             self._functions = resp.json()
         except requests.exceptions.RequestException as e:
             raise RPCNetworkError(f"Error discovering functions: {e}") from e
-
-    # ── RPC call ──
 
     def call(self, func_name: str, *args, **kwargs) -> Any:
         """Call a remote function by name."""
@@ -134,8 +127,6 @@ class RPCClient:
 
         return data["result"]
 
-    # ── Dynamic method dispatch ──
-
     def __getattr__(self, name: str):
         if self._functions is not None and name in self._functions:
             info = self._functions[name]
@@ -153,8 +144,6 @@ class RPCClient:
             f"No function '{name}' in experiment '{self.experiment}'. "
             f"Use client.help() to see available functions."
         )
-
-    # ── Convenience methods ──
 
     def list_functions(self) -> dict[str, dict]:
         """Return discovered functions with signatures and docs."""

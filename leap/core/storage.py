@@ -261,6 +261,21 @@ def query_logs(
     return [log_to_dict(log) for log in session.scalars(stmt)]
 
 
+def query_all_logs(session: Session, page_size: int = 5000, **kwargs) -> list[dict]:
+    """Fetch all logs by auto-paginating with cursor. Passes kwargs to query_logs."""
+    all_logs: list[dict] = []
+    after_id = None
+    while True:
+        page = query_logs(session, n=page_size, order="earliest", after_id=after_id, **kwargs)
+        if not page:
+            break
+        all_logs.extend(page)
+        if len(page) < page_size:
+            break
+        after_id = page[-1]["id"]
+    return all_logs
+
+
 def delete_log(session: Session, log_id: int) -> bool:
     """Delete a single log by id. Returns True if deleted, False if not found."""
     log = session.get(Log, log_id)

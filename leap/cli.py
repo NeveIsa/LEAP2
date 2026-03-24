@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
@@ -20,7 +21,7 @@ import typer
 import yaml
 
 from leap import __version__
-from leap.config import get_root, _is_lab_root
+from leap.config import get_root, is_lab_root
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,16 @@ def _print_validation_results(results: list[dict]) -> bool:
     return has_issues
 
 
+def _validate_and_report(exp_name: str, root: Path | None = None):
+    """Validate an experiment and print results with restart reminder."""
+    results = validate_experiment_fn(exp_name, root)
+    if _print_validation_results(results):
+        typer.echo("Some checks had warnings — review above.")
+    else:
+        typer.echo("Validation passed.")
+    typer.echo("Restart the server to load the new experiment.")
+
+
 class LabDetectedError(Exception):
     """Raised when a cloned repo is a lab, not an experiment."""
 
@@ -82,6 +93,24 @@ class LabDetectedError(Exception):
 
 def _resolve_root(root: Path | None) -> Path:
     return root or get_root()
+
+
+@contextlib.contextmanager
+def _experiment_session(experiment: str, root: Path | None = None):
+    """Open a DB session for an experiment, closing it on exit."""
+    from leap.core.experiment import ExperimentInfo
+    from leap.core import storage
+
+    resolved = _resolve_root(root)
+    exp_path = resolved / "experiments" / experiment
+    if not exp_path.is_dir():
+        raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
+    exp_info = ExperimentInfo(experiment, exp_path)
+    session = storage.get_session(experiment, exp_info.db_path)
+    try:
+        yield exp_info, session
+    finally:
+        session.close()
 
 
 def _get_git_remote(path: Path) -> str:
@@ -132,9 +161,6 @@ def _remove_gitignore_entry(root: Path, name: str) -> None:
         gitignore.write_text("\n".join(filtered) + "\n" if filtered else "", encoding="utf-8")
 
 
-# ── Shared functions (importable by API routes) ──
-
-
 def set_password_fn(root: Path | None = None) -> None:
     """Set or update the admin password."""
     import getpass
@@ -159,21 +185,11 @@ def add_student_fn(
     root: Path | None = None,
 ) -> dict:
     """Add a student to an experiment. Returns student dict."""
-    from leap.core.experiment import ExperimentInfo
     from leap.core import storage
 
-    resolved = _resolve_root(root)
-    exp_path = resolved / "experiments" / experiment
-    if not exp_path.is_dir():
-        raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
-
-    exp_info = ExperimentInfo(experiment, exp_path)
-    session = storage.get_session(experiment, exp_info.db_path)
-    try:
+    with _experiment_session(experiment, root) as (_exp_info, session):
         storage.add_student(session, student_id, name or student_id)
         return {"student_id": student_id, "name": name or student_id}
-    finally:
-        session.close()
 
 
 def import_students_fn(
@@ -182,13 +198,7 @@ def import_students_fn(
     root: Path | None = None,
 ) -> dict:
     """Import students from a CSV file. Returns result dict with added/skipped/errors."""
-    from leap.core.experiment import ExperimentInfo
     from leap.core import storage
-
-    resolved = _resolve_root(root)
-    exp_path = resolved / "experiments" / experiment
-    if not exp_path.is_dir():
-        raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
 
     if not csv_file.is_file():
         raise typer.BadParameter(f"CSV file not found: {csv_file}")
@@ -199,30 +209,16 @@ def import_students_fn(
             raise typer.BadParameter("CSV must have a 'student_id' column header")
         rows = list(reader)
 
-    exp_info = ExperimentInfo(experiment, exp_path)
-    session = storage.get_session(experiment, exp_info.db_path)
-    try:
+    with _experiment_session(experiment, root) as (_exp_info, session):
         return storage.bulk_add_students(session, rows)
-    finally:
-        session.close()
 
 
 def list_students_fn(experiment: str, root: Path | None = None) -> list[dict]:
     """List students in an experiment."""
-    from leap.core.experiment import ExperimentInfo
     from leap.core import storage
 
-    resolved = _resolve_root(root)
-    exp_path = resolved / "experiments" / experiment
-    if not exp_path.is_dir():
-        raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
-
-    exp_info = ExperimentInfo(experiment, exp_path)
-    session = storage.get_session(experiment, exp_info.db_path)
-    try:
+    with _experiment_session(experiment, root) as (_exp_info, session):
         return storage.list_students(session)
-    finally:
-        session.close()
 
 
 def init_project_fn(root: Path | None = None) -> dict[str, str]:
@@ -914,7 +910,6 @@ def doctor_fn(root: Path | None = None) -> list[dict]:
             )
         )
 
-    # Check repository field in root README
     if root_readme.is_file():
         repo = fm.get("repository", "")
         if repo:
@@ -922,11 +917,9 @@ def doctor_fn(root: Path | None = None) -> list[dict]:
         else:
             remote = _get_git_remote(resolved)
             if remote:
-                from leap.core.experiment import update_frontmatter_field
-                update_frontmatter_field(root_readme, "repository", remote)
                 results.append(_doctor_row(
-                    "repository", "ok",
-                    f"Auto-populated from git remote: {remote}",
+                    "repository", "warning",
+                    f"Not set in README (git remote: {remote}) — run `leap init` to populate",
                 ))
             else:
                 results.append(_doctor_row(
@@ -979,13 +972,12 @@ def doctor_fn(root: Path | None = None) -> list[dict]:
                 # Check experiment dependencies
                 req_file = exp_dir / exp_name / "requirements.txt"
                 if req_file.is_file():
+                    import importlib.util
                     missing_pkgs = []
                     for line in req_file.read_text(encoding="utf-8").splitlines():
                         line = line.strip()
                         if not line or line.startswith("#") or line.startswith("-"):
                             continue
-                        import importlib.util
-                        # Strip version specifiers (e.g. pyyaml>=6.0 → pyyaml)
                         pkg = line.split(">=")[0].split("<=")[0].split("==")[0].split("~=")[0].split("!=")[0].split("[")[0].strip()
                         import_name = pkg.replace("-", "_").lower()
                         import_name = _IMPORT_MAP.get(import_name, import_name)
@@ -1086,37 +1078,10 @@ def export_logs_fn(
     root: Path | None = None,
 ) -> int:
     """Export all logs for an experiment. Returns number of rows exported."""
-    from leap.core.experiment import ExperimentInfo
     from leap.core import storage
 
-    resolved = _resolve_root(root)
-    exp_path = resolved / "experiments" / experiment
-    if not exp_path.is_dir():
-        raise typer.BadParameter(f"Experiment '{experiment}' not found at {exp_path}")
-
-    exp_info = ExperimentInfo(experiment, exp_path)
-    session = storage.get_session(experiment, exp_info.db_path)
-
-    try:
-        all_logs: list[dict] = []
-        after_id = None
-        page_size = 5000
-
-        while True:
-            page = storage.query_logs(
-                session,
-                n=page_size,
-                order="earliest",
-                after_id=after_id,
-            )
-            if not page:
-                break
-            all_logs.extend(page)
-            if len(page) < page_size:
-                break
-            after_id = page[-1]["id"]
-    finally:
-        session.close()
+    with _experiment_session(experiment, root) as (_exp_info, session):
+        all_logs = storage.query_all_logs(session)
 
     if not all_logs:
         return 0
@@ -1306,15 +1271,6 @@ def discover_registry_fn(tag: str | None = None, entry_type: str | None = None) 
     return entries
 
 
-def publish_experiment_fn(
-    experiment: str,
-    root: Path | None = None,
-    dry_run: bool = False,
-) -> dict:
-    """Publish an experiment to the leaplive registry. Returns status dict."""
-    return publish_fn(experiment=experiment, root=root, dry_run=dry_run)
-
-
 def publish_fn(
     experiment: str | None = None,
     root: Path | None = None,
@@ -1469,10 +1425,7 @@ def publish_fn(
     return result
 
 
-# ── Template generators for `leap init` ──
-
-
-# ── CLI commands ──
+publish_experiment_fn = publish_fn
 
 
 @app.command()
@@ -1581,7 +1534,7 @@ def run(
     resolved = _resolve_root(root)
 
     # Verify project is initialized
-    if not _is_lab_root(resolved):
+    if not is_lab_root(resolved):
         typer.echo(
             "Error: This directory is not an initialized LEAP lab.\n"
             "Run 'leap init' first to set up the project.",
@@ -1734,7 +1687,7 @@ def _handle_lab_add(url: str, name: str):
     cwd = Path.cwd()
 
     # Check if inside a lab or under a lab's directory tree
-    if _is_lab_root(cwd) or any(_is_lab_root(p) for p in cwd.parents):
+    if is_lab_root(cwd) or any(is_lab_root(p) for p in cwd.parents):
         typer.echo(
             f"Error: Cannot add lab '{name}' — you are inside another lab.\n"
             f"Run this command from a directory above, or: git clone {url}",
@@ -1794,12 +1747,7 @@ def add_experiment(
         else:
             typer.echo(f"Installed experiment '{exp_name}' at {exp_path}")
 
-        results = validate_experiment_fn(exp_name, root)
-        if _print_validation_results(results):
-            typer.echo("Some checks had warnings — review above.")
-        else:
-            typer.echo("Validation passed.")
-        typer.echo("Restart the server to load the new experiment.")
+        _validate_and_report(exp_name, root)
     elif _is_local_path(name_or_url):
         try:
             exp_name, exp_path = copy_experiment_fn(name_or_url, name, root)
@@ -1809,12 +1757,7 @@ def add_experiment(
 
         typer.echo(f"Copied experiment '{exp_name}' from {name_or_url} to {exp_path}")
 
-        results = validate_experiment_fn(exp_name, root)
-        if _print_validation_results(results):
-            typer.echo("Some checks had warnings — review above.")
-        else:
-            typer.echo("Validation passed.")
-        typer.echo("Restart the server to load the new experiment.")
+        _validate_and_report(exp_name, root)
     else:
         try:
             exp_path = new_experiment_fn(name_or_url, root, interactive=not no_prompt)
