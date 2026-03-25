@@ -41,9 +41,8 @@ leap run --theme dark
 leap run --theme school-brand
 ```
 
-- If `--theme` is not provided, the built-in default theme is used (`leap/ui/shared/`).
 - If the specified theme folder doesn't exist under `ui/`, LEAP prints an error listing available themes and exits.
-- The lab's README frontmatter can also declare a default theme so that bare `leap run` uses it without requiring the flag:
+- The lab's README frontmatter can declare a default theme so that bare `leap run` uses it without requiring the flag:
 
 ```yaml
 ---
@@ -56,7 +55,17 @@ theme: dark
 
 1. `--theme` CLI flag (highest priority)
 2. `theme:` field in lab root README frontmatter
-3. Built-in default (no custom theme)
+3. **Auto-select**: If `ui/` exists and contains exactly one theme subfolder, that theme is used automatically
+4. Built-in default (no custom theme — `ui/` doesn't exist or is empty)
+
+If `ui/` contains multiple theme folders and neither `--theme` nor `theme:` in frontmatter is set, LEAP prints the available themes and exits with an error asking the user to select one:
+
+```
+Error: Multiple themes found in ui/ — please select one.
+  Available themes: dark, school-brand, minimal
+  Use: leap run --theme <name>
+  Or set 'theme: <name>' in your lab README.md frontmatter.
+```
 
 ### Resolution order for static files
 
