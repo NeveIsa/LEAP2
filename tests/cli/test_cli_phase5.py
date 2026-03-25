@@ -108,7 +108,7 @@ class TestDiscoverCommand:
         assert result.exit_code == 0
         assert "gradient-descent" in result.output
         assert "graph-search" in result.output
-        assert "Install with:" in result.output
+        assert "Install a lab with:" in result.output
 
     @patch("leap.cli.requests.get")
     def test_with_tag_filter(self, mock_get):

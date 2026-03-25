@@ -87,7 +87,10 @@ def get_engine(experiment_name: str, db_path: Path):
     with _engine_lock:
         if key not in _engines:
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            engine = create_engine(_db_url(db_path))
+            engine = create_engine(
+                _db_url(db_path),
+                connect_args={"config": {"preserve_insertion_order": False}},
+            )
             Base.metadata.create_all(engine)
             with engine.connect() as conn:
                 for idx_sql in _CREATE_INDEXES:

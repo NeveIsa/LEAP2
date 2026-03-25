@@ -138,8 +138,9 @@ class TestCheckLeapVersion:
         assert "99.0" in msg
 
     def test_gt_not_satisfied(self):
-        # Current version is 1.0.0, so >1.0.0 should fail
-        ok, msg = check_leap_version(">1.0.0")
+        from leap import __version__
+        # >current_version should fail
+        ok, msg = check_leap_version(f">{__version__}")
         assert ok is False
 
     def test_eq_satisfied(self):

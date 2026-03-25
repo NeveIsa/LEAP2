@@ -8,6 +8,19 @@ The storage layer (`storage.py`) already uses SQLAlchemy ORM, so the DB is abstr
 
 **Note:** A performance/production plan was referenced in the benchmark README at `plans/performance-production-plan.md` but does not exist yet. This database backend work should be incorporated into that plan when it's created.
 
+## Applied Optimizations
+
+### `preserve_insertion_order = false` (applied 2026-03-25)
+
+**What changed:** Added `connect_args={"config": {"preserve_insertion_order": False}}` to the DuckDB `create_engine()` call in `storage.py`.
+
+**Why:** DuckDB defaults to tracking row insertion order, which adds bookkeeping overhead on every write. This overhead is unnecessary for LEAP2 because:
+- Network requests from students arrive in nondeterministic order anyway — there is no meaningful "insertion order" to preserve.
+- All queries that need ordering already use explicit `ORDER BY` clauses (typically on `ts` or `id`).
+- The SQL standard does not guarantee result order without `ORDER BY`, so removing this guarantee costs nothing.
+
+**Trade-off:** Queries without `ORDER BY` may return rows in a different order across runs. This is acceptable and already expected behavior in the codebase.
+
 ## Design
 
 ### Configuration hierarchy
