@@ -1408,7 +1408,9 @@ def publish_fn(
         "type": entry_type,
         "display_name": fm.get("display_name", "") or name,
         "description": description,
+        "version": fm.get("version", ""),
         "authors": fm.get("authors", fm.get("author", [])),
+        "organizations": fm.get("organizations", fm.get("organization", [])),
         "repository": repository,
         "tags": fm.get("tags", []),
     }
@@ -2214,10 +2216,17 @@ def publish(
 
     table.add_row("name", Text(name, style="bold"))
     table.add_row("type", Text(entry_type))
+    display_name = fm.get("display_name", "") or name
+    table.add_row("display_name", Text(display_name))
     table.add_row("description", Text(fm.get("description", "") or "(missing)", style="" if fm.get("description") else "red"))
+    version = fm.get("version", "")
+    table.add_row("version", Text(version or "(none)", style="" if version else "dim"))
     _authors = fm.get("authors", fm.get("author", []))
     _authors_str = ", ".join(_authors) if isinstance(_authors, list) else (_authors or "")
     table.add_row("authors", Text(_authors_str or "(none)", style="" if _authors_str else "dim"))
+    _orgs = fm.get("organizations", fm.get("organization", []))
+    _orgs_str = ", ".join(_orgs) if isinstance(_orgs, list) else (_orgs or "")
+    table.add_row("organizations", Text(_orgs_str or "(none)", style="" if _orgs_str else "dim"))
     tags = ", ".join(fm.get("tags", []))
     table.add_row("tags", Text(tags or "(none)", style="" if tags else "dim"))
     repo = fm.get("repository", "")
