@@ -41,15 +41,32 @@ LEAP2 is a clean-room reimplementation of LEAP, fixing tight coupling problems (
 
 **Prerequisites:** Python 3.10+
 
+### Option A — with [uv](https://docs.astral.sh/uv/) (recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager that handles virtual environments automatically.
+
 ```bash
-# Install
+# Install uv (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
+# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Install LEAP
+uv venv && source .venv/bin/activate && uv pip install -e .
+```
+
+### Option B — with venv
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
+```
 
-# Set admin password
-leap set-password
+### Run
 
-# Start server (auto-creates project structure on first run)
-leap run
+```bash
+leap set-password                # Set admin password (first time)
+leap run                         # Start server
 ```
 
 Open http://localhost:9000 — the landing page lists available experiments.
