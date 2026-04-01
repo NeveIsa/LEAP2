@@ -214,19 +214,20 @@ See [docs/TESTING.md](docs/TESTING.md) for test structure and how to test experi
 
 ## Citation
 
-If you use LEAP in your work, please cite:
+If you use LEAP in your work, please cite our poster presented at **ACM SIGCSE TS 2026**:
 
-> Sumedh Karajagi, Sampad Bhusan Mohanty, and Bhaskar Krishnamachari. 2026. **LEAP -- Live Experiments for Active Pedagogy.** arXiv:2601.22534. DOI: [10.1145/3770761.3777313](https://doi.org/10.1145/3770761.3777313)
+> Sumedh Karajagi, Sampad Bhusan Mohanty, and Bhaskar Krishnamachari. 2026. **LEAP -- Live Experiments for Active Pedagogy.** In *Proceedings of the 57th ACM Technical Symposium on Computer Science Education (SIGCSE TS 2026)*. ACM. DOI: [10.1145/3770761.3777313](https://doi.org/10.1145/3770761.3777313)
 
 ```bibtex
-@misc{karajagi2026leapliveexperiments,
+@inproceedings{karajagi2026leap,
       title={LEAP -- Live Experiments for Active Pedagogy},
       author={Sumedh Karajagi and Sampad Bhusan Mohanty and Bhaskar Krishnamachari},
+      booktitle={Proceedings of the 57th ACM Technical Symposium on Computer Science Education (SIGCSE TS 2026)},
       year={2026},
+      publisher={ACM},
+      doi={10.1145/3770761.3777313},
       eprint={2601.22534},
       archivePrefix={arXiv},
-      primaryClass={cs.HC},
-      doi={https://doi.org/10.1145/3770761.3777313},
       url={https://arxiv.org/abs/2601.22534},
 }
 ```
