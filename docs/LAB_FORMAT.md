@@ -1,6 +1,4 @@
-# Lab & Experiment README Format
-
-## Lab README
+# Lab README Format
 
 The root `README.md` of a lab has YAML frontmatter:
 
@@ -36,41 +34,7 @@ experiments:
 | `tags` | no | List of tags (used by `leap discover`) |
 | `experiments` | no | List of `{name}` entries for experiments in the lab |
 
-## Experiment README
-
-Each experiment has a `README.md` with YAML frontmatter:
-
-```markdown
----
-name: default
-display_name: Default Lab
-description: Basic RPC lab with square, cubic, Rosenbrock.
-version: "1.0.0"
-entry_point: readme
-leap_version: ">=1.0"
-require_registration: true
-pages:
-  - {name: "Scores", file: "scores.html", admin: true}
----
-
-# Instructions
-
-1. Register your student ID.
-2. Use the RPC client to call functions.
-```
-
-| Field | Default | Description |
-|---|---|---|
-| `name` | folder name | Identifier (folder name is source of truth for routing) |
-| `display_name` | folder name | Human-readable name |
-| `description` | `""` | Short description |
-| `version` | `""` | Experiment version (shown on landing page card) |
-| `entry_point` | `readme` | `readme` = experiment README page; or a UI file in `ui/` (e.g. `dashboard.html`) |
-| `leap_version` | _(none)_ | Minimum LEAP2 version required (enforced; `>=1.0`, `==1.0.0`, or bare `1.0`) |
-| `require_registration` | `true` | Require student registration for RPC |
-| `pages` | `[]` | Extra navbar links: `[{name, file, admin}]`. Admin-only pages hidden for non-admins. |
-
-> **Note:** Experiment names must be lowercase. Folder names must match `[a-z0-9][a-z0-9_-]*` — only lowercase letters, digits, hyphens, and underscores are allowed. Folders with uppercase characters are silently skipped at discovery. Use `display_name` in frontmatter for human-readable names.
+The `assets/` directory is optional. If present, its contents are served at `/assets/` — useful for lab icons, images, or other static files.
 
 ## Student CSV Format
 

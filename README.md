@@ -90,7 +90,7 @@ my-lab/                      ← lab
     └── graph-search/        ← experiment
 ```
 
-See [Lab & Experiment README Format](docs/LAB_FORMAT.md) for frontmatter fields.
+See [Lab Format](docs/LAB_FORMAT.md) and [Experiment Format](docs/EXPERIMENT_FORMAT.md) for frontmatter fields.
 
 ## Creating & Sharing Experiments
 
@@ -208,7 +208,8 @@ See [docs/TESTING.md](docs/TESTING.md) for test structure and how to test experi
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design goals, decoupling layer, project structure |
 | [SCHEMA.md](docs/SCHEMA.md) | Database schema, log data contract |
 | [UI.md](docs/UI.md) | Shared pages, navbar, footer, landing page |
-| [LAB_FORMAT.md](docs/LAB_FORMAT.md) | Lab & experiment README frontmatter, CSV format |
+| [LAB_FORMAT.md](docs/LAB_FORMAT.md) | Lab README frontmatter, CSV import format |
+| [EXPERIMENT_FORMAT.md](docs/EXPERIMENT_FORMAT.md) | Experiment README frontmatter fields |
 | [TESTING.md](docs/TESTING.md) | Test structure, testing experiments in your lab |
 
 ## Citation
